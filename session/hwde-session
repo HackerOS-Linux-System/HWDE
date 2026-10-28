@@ -1,0 +1,32 @@
+#!/usr/bin/hl
+using <gen 2>
+
+;; Ustawienie zmiennych środowiskowych
+> export XDG_SESSION_TYPE=wayland
+> export XDG_SESSION_DESKTOP=HWDE
+> export XDG_CURRENT_DESKTOP=HWDE:wlroots
+> export MOZ_ENABLE_WAYLAND=1
+> export QT_QPA_PLATFORM="wayland;xcb"
+> export GDK_BACKEND="wayland,x11"
+> export SDL_VIDEODRIVER="wayland,x11"
+> export ELECTRON_OZONE_PLATFORM_HINT=auto
+> export _JAVA_AWT_WM_NONREPARENTING=1
+
+;; XCURSOR_SIZE z domyślną wartością 24
+% cursor_size: str = @XCURSOR_SIZE
+? @cursor_size == ""
+    % cursor_size: str = 24
+done
+> export XCURSOR_SIZE=@cursor_size
+
+;; Konfiguracja labwc generowana z ~/.config/hwde/hwde.conf
+> hwde apply >/dev/null 2>&1
+
+;; W sesji bez szyny D-Bus uruchom własną
+% dbus_addr: str = @DBUS_SESSION_BUS_ADDRESS
+> command -v dbus-run-session >/dev/null 2>&1
+? @dbus_addr == "" && ok
+    > exec dbus-run-session -- labwc $@
+done
+
+> exec labwc $@
