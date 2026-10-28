@@ -1,0 +1,274 @@
+get <bit:gui>
+include <sys>
+include <conf>
+include <sysinfo>
+
+!! ============================================================================
+!! Generator konfiguracji labwc z hwde.conf: rc.xml, themerc-override, environment,
+!! menu.xml i autostart. Wywolywany przez Ustawienia ("hwde apply") i przy starcie sesji.
+!! Wlasne dodatki XML: ~/.config/hwde/rc-extra.xml (wklejane na koncu rc.xml).
+!! ============================================================================
+
+fun xml_esc(s: Str) -> Str [
+    let t = s_replace(s, "&", "&amp;")
+    t = s_replace(t.clone(), "<", "&lt;")
+    t = s_replace(t.clone(), ">", "&gt;")
+    end s_replace(t.clone(), "\"", "&quot;")
+]
+
+fun hex2(n: Int) -> Str [
+    let d = "0123456789abcdef"
+    let v = iclamp(n, 0, 255)
+    end d.char_at(v / 16) + d.char_at(v % 16)
+]
+
+fun hex_of(c: Int) -> Str [
+    end "#" + hex2(col_r(c)) + hex2(col_g(c)) + hex2(col_b(c))
+]
+
+fun hex_a(c: Int) -> Str [
+    end hex_of(c) + hex2(col_a(c))
+]
+
+fun yes_no(b: Bool) -> Str [
+    if b [
+        end "yes"
+    ]
+    end "no"
+]
+
+fun themerc_text(c: Conf, th: Theme) -> Str [
+    let p = th.p.clone()
+    let bw = cget_i(c.clone(), "windows.border")
+    let t = "# HWDE - generowane z hwde.conf (Ustawienia). Nie edytuj recznie.\n"
+    t = t + "border.width: " + (bw as Str) + "\n"
+    t = t + "window.titlebar.padding.height: 6\n"
+    t = t + "window.titlebar.padding.width: 8\n"
+    t = t + "window.active.border.color: " + hex_of(mix(p.surface3, p.text, 0.15)) + "\n"
+    t = t + "window.inactive.border.color: " + hex_of(p.surface2) + "\n"
+    t = t + "window.active.title.bg.color: " + hex_of(p.surface) + "\n"
+    t = t + "window.inactive.title.bg.color: " + hex_of(p.bg) + "\n"
+    t = t + "window.active.label.text.color: " + hex_of(p.text) + "\n"
+    t = t + "window.inactive.label.text.color: " + hex_of(p.muted) + "\n"
+    t = t + "window.label.text.justify: left\n"
+    t = t + "window.button.width: 24\n"
+    t = t + "window.button.height: 24\n"
+    t = t + "window.button.spacing: 2\n"
+    t = t + "window.button.hover.bg.color: " + hex_a(with_alpha(p.text, 36)) + "\n"
+    t = t + "window.button.hover.bg.corner-radius: 6\n"
+    t = t + "window.active.button.unpressed.image.color: " + hex_of(p.subtext) + "\n"
+    t = t + "window.inactive.button.unpressed.image.color: " + hex_of(p.muted) + "\n"
+    t = t + "window.active.shadow.size: 36\n"
+    t = t + "window.inactive.shadow.size: 20\n"
+    t = t + "window.active.shadow.color: #00000070\n"
+    t = t + "window.inactive.shadow.color: #00000040\n"
+    t = t + "menu.border.width: 1\n"
+    t = t + "menu.border.color: " + hex_of(p.surface3) + "\n"
+    t = t + "menu.items.padding.x: 12\n"
+    t = t + "menu.items.padding.y: 7\n"
+    t = t + "menu.items.bg.color: " + hex_of(p.surface) + "\n"
+    t = t + "menu.items.text.color: " + hex_of(p.text) + "\n"
+    t = t + "menu.items.active.bg.color: " + hex_of(p.surface3) + "\n"
+    t = t + "menu.items.active.text.color: " + hex_of(p.text) + "\n"
+    t = t + "menu.separator.color: " + hex_of(p.surface3) + "\n"
+    t = t + "menu.title.bg.color: " + hex_of(p.surface2) + "\n"
+    t = t + "menu.title.text.color: " + hex_of(p.subtext) + "\n"
+    t = t + "osd.bg.color: " + hex_of(p.surface) + "\n"
+    t = t + "osd.border.color: " + hex_of(p.surface3) + "\n"
+    t = t + "osd.label.text.color: " + hex_of(p.text) + "\n"
+    t = t + "osd.window-switcher.item.active.bg.color: " + hex_of(p.surface3) + "\n"
+    t = t + "osd.window-switcher.item.active.border.color: " + hex_of(p.primary) + "\n"
+    t = t + "snapping.overlay.region.bg.color: " + hex_a(with_alpha(p.primary, 70)) + "\n"
+    t = t + "snapping.overlay.edge.bg.color: " + hex_a(with_alpha(p.primary, 70)) + "\n"
+    end t
+]
+
+fun keybind_xml(k: Str, v: Str) -> Str [
+    let key = k
+    let attrs = ""
+    if k == "Super_L" or k == "Super_R" [
+        attrs = " onRelease=\"yes\""
+    ]
+    let x = "    <keybind key=\"" + xml_esc(key.clone()) + "\"" + attrs + ">\n"
+    if s_starts(v.clone(), "exec:") [
+        x = x + "      <action name=\"Execute\" command=\"" + xml_esc(trim(s_sub(v.clone(), 5, slen(v.clone())))) + "\" />\n"
+    ] elif s_starts(v.clone(), "action:") [
+        let parts = s_split(s_sub(v.clone(), 7, slen(v.clone())), ":")
+        x = x + "      <action name=\"" + xml_esc(parts[0].clone()) + "\""
+        let i = 1
+        while i < parts.len() [
+            let kv = split_kv(parts[i].clone())
+            if kv.len() == 2 [
+                x = x + " " + xml_esc(kv[0].clone()) + "=\"" + xml_esc(kv[1].clone()) + "\""
+            ]
+            i = i + 1
+        ]
+        x = x + " />\n"
+    ] else [
+        end ""
+    ]
+    end x + "    </keybind>\n"
+]
+
+fun labwc_rc_text(c: Conf) -> Str [
+    let x = "<?xml version=\"1.0\"?>\n<!-- HWDE: generowane z ~/.config/hwde/hwde.conf. Wlasne dodatki: ~/.config/hwde/rc-extra.xml -->\n<labwc_config>\n"
+    x = x + "  <core>\n    <decoration>server</decoration>\n    <gap>" + (iclamp(cget_i(c.clone(), "windows.gap"), 0, 100) as Str) + "</gap>\n  </core>\n"
+    x = x + "  <theme>\n    <name>HWDE</name>\n    <cornerRadius>" + (iclamp(cget_i(c.clone(), "windows.corner_radius"), 0, 30) as Str) + "</cornerRadius>\n"
+    x = x + "    <keepBorder>yes</keepBorder>\n    <dropShadows>" + yes_no(cget_b(c.clone(), "windows.shadows")) + "</dropShadows>\n"
+    x = x + "    <titlebar>\n      <layout>" + xml_esc(cget(c.clone(), "windows.titlebar")) + "</layout>\n      <showTitle>yes</showTitle>\n    </titlebar>\n"
+    let font = xml_esc(cget(c.clone(), "windows.font"))
+    let fsz = (iclamp(cget_i(c.clone(), "windows.font_size"), 6, 32) as Str)
+    let places = ["ActiveWindow", "InactiveWindow", "MenuItem", "OnScreenDisplay"]
+    let i = 0
+    while i < places.len() [
+        x = x + "    <font place=\"" + places[i] + "\"><name>" + font + "</name><size>" + fsz + "</size></font>\n"
+        i = i + 1
+    ]
+    x = x + "  </theme>\n"
+    x = x + "  <focus>\n    <followMouse>" + yes_no(cget_b(c.clone(), "windows.focus_follows_mouse")) + "</followMouse>\n    <raiseOnFocus>yes</raiseOnFocus>\n  </focus>\n"
+    let snap = "10"
+    if not cget_b(c.clone(), "windows.snap") [
+        snap = "0"
+    ]
+    x = x + "  <snapping>\n    <range>" + snap + "</range>\n    <topMaximize>yes</topMaximize>\n  </snapping>\n"
+    x = x + "  <desktops number=\"" + (iclamp(cget_i(c.clone(), "windows.workspaces"), 1, 10) as Str) + "\">\n    <popupTime>700</popupTime>\n  </desktops>\n"
+    x = x + "  <keyboard>\n    <numlock>"
+    if cget_b(c.clone(), "input.numlock") [
+        x = x + "on"
+    ] else [
+        x = x + "off"
+    ]
+    x = x + "</numlock>\n    <repeatRate>" + (cget_i(c.clone(), "input.repeat_rate") as Str) + "</repeatRate>\n    <repeatDelay>" + (cget_i(c.clone(), "input.repeat_delay") as Str) + "</repeatDelay>\n"
+    let keys = c.kv.keys()
+    let names: List<Str> = []
+    let j = 0
+    while j < keys.len() [
+        if s_starts(keys[j].clone(), "keys.") [
+            names.push(keys[j].clone())
+        ]
+        j = j + 1
+    ]
+    let sorted = sort_strs(names)
+    let k = 0
+    while k < sorted.len() [
+        x = x + keybind_xml(key_of(sorted[k].clone()), cget(c.clone(), sorted[k].clone()))
+        k = k + 1
+    ]
+    x = x + "  </keyboard>\n  <mouse>\n    <default />\n  </mouse>\n"
+    x = x + "  <libinput>\n    <device category=\"touchpad\">\n      <tap>" + yes_no(cget_b(c.clone(), "input.tap")) + "</tap>\n      <tapAndDrag>yes</tapAndDrag>\n      <naturalScroll>" + yes_no(cget_b(c.clone(), "input.natural_scroll")) + "</naturalScroll>\n      <disableWhileTyping>" + yes_no(cget_b(c.clone(), "input.disable_while_typing")) + "</disableWhileTyping>\n    </device>\n"
+    x = x + "    <device category=\"default\">\n      <pointerSpeed>" + cget(c.clone(), "input.pointer_speed") + "</pointerSpeed>\n      <accelProfile>" + xml_esc(cget(c.clone(), "input.accel")) + "</accelProfile>\n    </device>\n  </libinput>\n"
+    x = x + gui_read_file(conf_dir() + "/rc-extra.xml")
+    end x + "</labwc_config>\n"
+]
+
+fun labwc_menu_text(c: Conf) -> Str [
+    let m = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<openbox_menu>\n  <menu id=\"root-menu\">\n"
+    m = m + "    <item label=\"" + tr(c.clone(), "Terminal", "Terminal") + "\"><action name=\"Execute\" command=\"hwde run terminal\" /></item>\n"
+    m = m + "    <item label=\"" + tr(c.clone(), "Pliki", "Files") + "\"><action name=\"Execute\" command=\"hwde run files\" /></item>\n"
+    m = m + "    <item label=\"" + tr(c.clone(), "Przeglądarka", "Browser") + "\"><action name=\"Execute\" command=\"hwde run browser\" /></item>\n"
+    m = m + "    <item label=\"" + tr(c.clone(), "Aplikacje", "Applications") + "\"><action name=\"Execute\" command=\"hwde launcher\" /></item>\n"
+    m = m + "    <separator />\n"
+    m = m + "    <item label=\"" + tr(c.clone(), "Ustawienia", "Settings") + "\"><action name=\"Execute\" command=\"hwde settings\" /></item>\n"
+    m = m + "    <item label=\"" + tr(c.clone(), "Zablokuj", "Lock") + "\"><action name=\"Execute\" command=\"hwde lock\" /></item>\n"
+    m = m + "    <item label=\"" + tr(c.clone(), "Zasilanie", "Power") + "\"><action name=\"Execute\" command=\"hwde power\" /></item>\n"
+    end m + "  </menu>\n</openbox_menu>\n"
+]
+
+fun labwc_env_text(c: Conf) -> Str [
+    let e = "# HWDE - generowane z hwde.conf\n"
+    e = e + "XKB_DEFAULT_LAYOUT=" + cget(c.clone(), "input.layout") + "\n"
+    e = e + "XKB_DEFAULT_VARIANT=" + cget(c.clone(), "input.variant") + "\n"
+    e = e + "XKB_DEFAULT_OPTIONS=" + cget(c.clone(), "input.options") + "\n"
+    e = e + "XDG_CURRENT_DESKTOP=HWDE:wlroots\nXDG_SESSION_DESKTOP=HWDE\nXDG_SESSION_TYPE=wayland\n"
+    e = e + "MOZ_ENABLE_WAYLAND=1\nQT_QPA_PLATFORM=wayland;xcb\nGDK_BACKEND=wayland,x11\nSDL_VIDEODRIVER=wayland,x11\nELECTRON_OZONE_PLATFORM_HINT=auto\n_JAVA_AWT_WM_NONREPARENTING=1\n"
+    end e
+]
+
+!! zapisuje pliki do ~/.config/labwc; reconfigure=true => labwc wczytuje je od razu
+fun labwc_apply(c: Conf, reconfigure: Bool) [
+    let th = hw_theme(c.clone())
+    let d = labwc_dir()
+    gui_run("mkdir", ["-p", d])
+    gui_write_file(d + "/rc.xml", labwc_rc_text(c.clone()))
+    gui_write_file(d + "/themerc-override", themerc_text(c.clone(), th))
+    gui_write_file(d + "/menu.xml", labwc_menu_text(c.clone()))
+    gui_write_file(d + "/environment", labwc_env_text(c.clone()))
+    gui_write_file(d + "/autostart", "# HWDE - generowane. Wlasne programy: sekcja [autostart] w hwde.conf\nhwde autostart >/dev/null 2>&1 &\n")
+    if reconfigure [
+        !! labwc przeladowuje konfiguracje po SIGHUP (to samo robi `labwc --reconfigure`)
+        hw_status("pkill", ["-HUP", "-u", hw_user(), "-x", "labwc"])
+    ]
+    !! aplikacje GTK/portale: preferencja jasny/ciemny (gdy jest gsettings)
+    if hw_which("gsettings") [
+        let scheme = "prefer-light"
+        if is_dark(c.clone()) [
+            scheme = "prefer-dark"
+        ]
+        gui_spawn("gsettings", ["set", "org.gnome.desktop.interface", "color-scheme", scheme])
+    ]
+]
+
+!! ---------------------------------------------------------------- hwde autostart
+fun apply_display(c: Conf) [
+    if not hw_which("wlr-randr") [
+        end
+    ]
+    let keys = c.kv.keys()
+    let i = 0
+    while i < keys.len() [
+        if s_starts(keys[i].clone(), "display.scale.") [
+            let name = s_sub(keys[i].clone(), 14, slen(keys[i].clone()))
+            let v = cget(c.clone(), keys[i].clone())
+            if v != "" [
+                hw_status("wlr-randr", ["--output", name, "--scale", v])
+            ]
+        ]
+        i = i + 1
+    ]
+]
+
+fun run_autostart() [
+    let c = conf_load()
+    if hw_which("dbus-update-activation-environment") [
+        gui_spawn("dbus-update-activation-environment", ["--systemd", "WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE", "DISPLAY"])
+    ]
+    apply_display(c.clone())
+    let agents = ["/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1", "/usr/libexec/polkit-gnome-authentication-agent-1", "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1", "/usr/bin/lxqt-policykit-agent", "/usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1", "/usr/libexec/hyprpolkitagent"]
+    let a = 0
+    while a < agents.len() [
+        if hw_which(agents[a].clone()) [
+            gui_spawn(agents[a].clone(), [])
+            a = agents.len()
+        ]
+        a = a + 1
+    ]
+    let keys = c.kv.keys()
+    let names: List<Str> = []
+    let i = 0
+    while i < keys.len() [
+        if s_starts(keys[i].clone(), "autostart.") [
+            names.push(keys[i].clone())
+        ]
+        i = i + 1
+    ]
+    let sorted = sort_strs(names)
+    let k = 0
+    while k < sorted.len() [
+        let cmd = cget(c.clone(), sorted[k].clone())
+        if cmd != "" [
+            gui_spawn("sh", ["-c", cmd])
+        ]
+        k = k + 1
+    ]
+    !! powloka z automatycznym restartem po awarii (kod != 0)
+    let tries = 0
+    while tries < 20 [
+        let st = hw_status(hw_self(), ["shell"])
+        if st == 0 [
+            tries = 100
+        ] else [
+            tries = tries + 1
+            hw_sleep_ms(1000)
+        ]
+    ]
+]
