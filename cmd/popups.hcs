@@ -1,0 +1,685 @@
+get <bit:gui>
+include <sys>
+include <conf>
+include <sysinfo>
+include <shell>
+
+!! ============================================================================
+!! Okienka pomocnicze (osobne, krotkie procesy z jednym oknem layer-shell):
+!!   hwde launcher | hwde popup quick | hwde popup calendar | hwde power | hwde osd ...
+!! Ten sam skrot drugi raz zamyka okno (przelacznik), wiec nie ma potrzeby IPC.
+!! ============================================================================
+
+fun popup_app(c: Conf) -> App [
+    let app = app_new_headless_shell()
+    let th = hw_theme(c.clone())
+    app.set_theme(th.clone())
+    app.set_css(hw_css(c.clone(), th))
+    end app
+]
+
+fun backdrop(dim: Bool) -> Element [
+    let b = button_with(space().fill_all()).on_press("bg").padding(0.0).fill_all()
+    if dim [
+        b.class = "ghost dim"
+    ] else [
+        b.class = "ghost bare"
+    ]
+    end b
+]
+
+!! karta w rogu (pod panelem) albo na srodku
+fun place_top_right(card: Element, c: Conf) -> Element [
+    let off = panel_h(c.clone()) + panel_m(c.clone()) * 2 + 4
+    let box = container(card).fill_all()
+    if cget(c.clone(), "panel.position") == "bottom" [
+        end box.align_x(2).align_y(2).padding_4(0.0, 8.0, off as Float, 0.0)
+    ]
+    end box.align_x(2).align_y(0).padding_4(off as Float, 8.0, 0.0, 0.0)
+]
+
+fun place_top_center(card: Element, c: Conf) -> Element [
+    let off = panel_h(c.clone()) + panel_m(c.clone()) * 2 + 4
+    let box = container(card).fill_all()
+    if cget(c.clone(), "panel.position") == "bottom" [
+        end box.align_x(1).align_y(2).padding_4(0.0, 0.0, off as Float, 0.0)
+    ]
+    end box.align_x(1).align_y(0).padding_4(off as Float, 0.0, 0.0, 0.0)
+]
+
+fun solid_card(inner: Element, th: Theme, w: Float) -> Element [
+    let e = container(inner)
+    end e.padding(16.0).radius(th.radius_lg).background(th.p.surface).border(1.0, th.p.border).shadow(30.0, 10.0, th.p.shadow).width(fixed(w))
+]
+
+fun avatar(letter: Str, size: Float, th: Theme) -> Element [
+    let t = text(letter).bold().size(size * 0.46).color(th.p.primary_text)
+    let e = container(t).center()
+    end e.background(th.p.primary).radius(size).size_px(size, size)
+]
+
+!! ============================================================================
+!! LAUNCHER
+!! ============================================================================
+fun hist_path() -> Str [
+    let x = gui_env("XDG_CACHE_HOME")
+    if x == "" [
+        end home_dir() + "/.cache/hwde/history"
+    ]
+    end x + "/hwde/history"
+]
+
+fun hist_load() -> Dict<Str, Int> [
+    let d: Dict<Str, Int> = dict()
+    let lines = s_split(gui_read_file(hist_path()), "\n")
+    let i = 0
+    while i < lines.len() [
+        let p = s_split(lines[i].clone(), "\t")
+        if p.len() == 2 [
+            d.insert(p[1].clone(), parse_i(p[0].clone()))
+        ]
+        i = i + 1
+    ]
+    end d
+]
+
+fun hist_count(h: Dict<Str, Int>, name: Str) -> Int [
+    match h.fetch(name) [
+        Some(v) -> [
+            end v
+        ]
+        None -> [
+            end 0
+        ]
+    ]
+    end 0
+]
+
+fun hist_bump(name: Str) [
+    let h = hist_load()
+    h.insert(name.clone(), hist_count(h.clone(), name.clone()) + 1)
+    let out = ""
+    let keys = h.keys()
+    let i = 0
+    while i < keys.len() [
+        out = out + (hist_count(h.clone(), keys[i].clone()) as Str) + "\t" + keys[i] + "\n"
+        i = i + 1
+    ]
+    gui_run("mkdir", ["-p", s_sub(hist_path(), 0, slen(hist_path()) - 8)])
+    gui_write_file(hist_path(), out)
+]
+
+fun app_score(a: AppEntry, q: Str, hist: Dict<Str, Int>) -> Int [
+    let name = gui_lower(a.name.clone())
+    let base = 0
+    if q == "" [
+        base = 1000
+    ] elif s_starts(name.clone(), q.clone()) [
+        base = 3000
+    ] elif s_find(name.clone(), " " + q) >= 0 [
+        base = 2500
+    ] elif s_find(name.clone(), q.clone()) >= 0 [
+        base = 2000
+    ] elif slen(q.clone()) >= 3 and s_find(gui_lower(a.comment.clone()), q.clone()) >= 0 [
+        base = 1000
+    ] else [
+        end -1
+    ]
+    end base + hist_count(hist.clone(), a.name.clone()) * 5
+]
+
+fun apps_search(apps: List<AppEntry>, query: Str, hist: Dict<Str, Int>) -> List<AppEntry> [
+    let q = gui_lower(query)
+    let scores: List<Int> = []
+    let items: List<AppEntry> = []
+    let i = 0
+    while i < apps.len() [
+        let sc = app_score(apps[i].clone(), q.clone(), hist.clone())
+        if sc >= 0 [
+            items.push(apps[i].clone())
+            scores.push(sc)
+        ]
+        i = i + 1
+    ]
+    !! sortowanie stabilne (babelkowe) malejaco po punktach
+    let n = items.len()
+    let x = 0
+    while x < n [
+        let y = 0
+        while y + 1 < n - x [
+            if scores[y] < scores[y + 1] [
+                let ts = scores[y]
+                scores[y] = scores[y + 1]
+                scores[y + 1] = ts
+                let ti = items[y].clone()
+                items[y] = items[y + 1].clone()
+                items[y + 1] = ti
+            ]
+            y = y + 1
+        ]
+        x = x + 1
+    ]
+    end items
+]
+
+fun initial_of(name: Str) -> Str [
+    if slen(name.clone()) == 0 [
+        end "?"
+    ]
+    end gui_upper(s_sub(name.clone(), 0, 1))
+]
+
+fun launcher_ui(c: Conf, th: Theme, query: Str, results: List<AppEntry>, sel: Int) -> Element [
+    let rows: List<Element> = []
+    let shown = 0
+    let first = 0
+    if sel >= 8 [
+        first = sel - 7
+    ]
+    let i = first
+    while i < results.len() and shown < 8 [
+        let it = results[i].clone()
+        let line = row([ avatar(initial_of(it.name.clone()), 32.0, th.clone()), column([ text(it.name.clone()).bold().size(14.0), text(short_title(it.comment.clone(), 64)).size(12.0).color(th.p.subtext) ]).spacing(1.0).fill_width() ]).spacing(12.0).align_y(1).fill_width()
+        let b = button_with(line).on_press("run:" + (i as Str)).class("ghost").fill_width().padding_xy(10.0, 7.0)
+        b.st.ax = 0
+        if i == sel [
+            b = b.background(with_alpha(th.p.text, 26))
+        ]
+        rows.push(b)
+        shown = shown + 1
+        i = i + 1
+    ]
+    if results.len() == 0 [
+        rows.push(text(tr(c.clone(), "Brak wyników", "No results")).color(th.p.muted).padding(12.0))
+    ]
+    let search = row([ icon("search").size(18.0).color(th.p.subtext), text_input(tr(c.clone(), "Szukaj aplikacji lub wpisz > polecenie…", "Search apps or type > command…"), query).id("search").on_input("q").on_submit("run_sel").fill_width() ]).spacing(10.0).align_y(1).fill_width()
+    let hint = text(tr(c.clone(), "↑↓ wybór   Enter uruchom   Esc zamknij", "↑↓ select   Enter run   Esc close")).size(11.0).color(th.p.muted)
+    let box = column([ search, rule(), column(rows).spacing(2.0).fill_width(), hint ]).spacing(12.0).fill_width()
+    let card = solid_card(box, th.clone(), 600.0)
+    let pos = container(card).fill_all().align_x(1).align_y(0).padding_4(110.0, 0.0, 0.0, 0.0)
+    end stack([ backdrop(true), pos ])
+]
+
+fun run_launcher() [
+    if hw_single("popup", 0) == 0 [
+        end
+    ]
+    let c = conf_load()
+    let th = hw_theme(c.clone())
+    let app = popup_app(c.clone())
+    let id = app.open_window("layer", "launcher", 0, 0, overlay_opts("hwde-launcher"))
+    if id < 0 [
+        log("launcher wymaga kompozytora z wlr-layer-shell")
+        end
+    ]
+    let apps = apps_load()
+    let hist = hist_load()
+    let query = ""
+    let sel = 0
+    let results = apps_search(apps.clone(), "", hist.clone())
+    let focused = false
+    while app.running() [
+        if not focused [
+            app.focus_id(id, "search")
+            focused = true
+        ]
+        let launch = -1
+        let cmd = ""
+        for m in app.frame1(launcher_ui(c.clone(), th.clone(), query.clone(), results.clone(), sel)) [
+            if m.id == "bg" [
+                app.quit()
+            ]
+            if m.id == "q" [
+                query = m.text.clone()
+                sel = 0
+                if s_starts(query.clone(), ">") [
+                    results = []
+                ] else [
+                    results = apps_search(apps.clone(), trim(query.clone()), hist.clone())
+                ]
+            ]
+            if m.id == "key" [
+                if m.text == "Escape" [
+                    app.quit()
+                ]
+                if m.text == "ArrowDown" and sel + 1 < results.len() [
+                    sel = sel + 1
+                ]
+                if m.text == "ArrowUp" and sel > 0 [
+                    sel = sel - 1
+                ]
+            ]
+            if m.id == "run_sel" [
+                if s_starts(query.clone(), ">") [
+                    cmd = trim(s_sub(query.clone(), 1, slen(query.clone())))
+                ] elif results.len() > 0 [
+                    launch = sel
+                ]
+            ]
+            if s_starts(m.id.clone(), "run:") [
+                launch = parse_i(s_sub(m.id.clone(), 4, slen(m.id.clone())))
+            ]
+        ]
+        if launch >= 0 and launch < results.len() [
+            hist_bump(results[launch].name.clone())
+            app_launch(results[launch].exec.clone())
+            app.quit()
+        ]
+        if cmd != "" [
+            sh(cmd.clone())
+            app.quit()
+        ]
+    ]
+    hw_single_done("popup")
+]
+
+!! ============================================================================
+!! SZYBKIE USTAWIENIA
+!! ============================================================================
+struct Quick [
+    vol: Int,
+    muted: Bool,
+    bright: Int,
+    net: Net,
+    bt: Bool,
+    bat: Int,
+    charging: Bool,
+    dark: Bool,
+    dnd: Bool
+]
+
+fun tile(label: Str, sub: Str, ic: Str, on: Bool, msg: Str, th: Theme) -> Element [
+    let fg = th.p.text
+    if on [
+        fg = th.p.primary_text
+    ]
+    let inner = row([ icon(ic).size(18.0).color(fg), column([ text(label).bold().size(13.0).color(fg), text(sub).size(11.0).color(fg) ]).spacing(0.0) ]).spacing(10.0).align_y(1)
+    let b = button_with(inner).on_press(msg).class("ghost").padding_xy(12.0, 10.0).width(fill()).radius(th.radius)
+    b.st.ax = 0
+    if on [
+        end b.background(th.p.primary)
+    ]
+    end b.background(th.p.surface2)
+]
+
+fun quick_ui(c: Conf, th: Theme, q: Quick) -> Element [
+    let user = hw_user()
+    let head = row([ avatar(initial_of(user.clone()), 36.0, th.clone()), column([ text(user.clone()).bold().size(14.0), text(date_long(c.clone(), clock_now())).size(12.0).color(th.p.subtext) ]).spacing(1.0).fill_width(), button("").with_icon("settings").on_press("settings").class("ghost icon"), button("").with_icon("lock").on_press("lock").class("ghost icon"), button("").with_icon("power").on_press("power").class("ghost icon") ]).spacing(6.0).align_y(1).fill_width()
+    let kids: List<Element> = [ head, rule() ]
+    let netsub = tr(c.clone(), "Rozłączono", "Disconnected")
+    if q.net.kind == "wifi" or q.net.kind == "ethernet" [
+        netsub = short_title(q.net.name.clone(), 14)
+    ]
+    if not q.net.wifi_on [
+        netsub = tr(c.clone(), "Wyłączone", "Off")
+    ]
+    let r1: List<Element> = []
+    if has_nmcli() [
+        r1.push(tile("Wi-Fi", netsub, "wifi", q.net.wifi_on, "t_wifi", th.clone()))
+    ]
+    if has_bt() [
+        let bs = tr(c.clone(), "Wyłączony", "Off")
+        if q.bt [
+            bs = tr(c.clone(), "Włączony", "On")
+        ]
+        r1.push(tile("Bluetooth", bs, "bluetooth", q.bt, "t_bt", th.clone()))
+    ]
+    if r1.len() > 0 [
+        kids.push(row(r1).spacing(8.0).fill_width())
+    ]
+    let ds = tr(c.clone(), "Ciemny", "Dark")
+    if not q.dark [
+        ds = tr(c.clone(), "Jasny", "Light")
+    ]
+    let dn = tr(c.clone(), "Wyłączone", "Off")
+    if q.dnd [
+        dn = tr(c.clone(), "Włączone", "On")
+    ]
+    let r2: List<Element> = [ tile(tr(c.clone(), "Motyw", "Theme"), ds, "moon", q.dark, "t_dark", th.clone()), tile(tr(c.clone(), "Nie przeszkadzać", "Do not disturb"), dn, "bell-off", q.dnd, "t_dnd", th.clone()) ]
+    kids.push(row(r2).spacing(8.0).fill_width())
+    if q.vol >= 0 [
+        let vi = vol_icon(q.vol, q.muted)
+        let sl = slider(0.0, 100.0, fclamp(q.vol as Float, 0.0, 100.0)).on_change("vol").fill_width()
+        kids.push(row([ button("").with_icon(vi).on_press("mute").class("ghost icon"), sl, text((q.vol as Str) + "%").size(12.0).width(fixed(38.0)).text_align(2) ]).spacing(8.0).align_y(1).fill_width())
+    ]
+    if q.bright >= 0 [
+        let sl2 = slider(1.0, 100.0, fclamp(q.bright as Float, 1.0, 100.0)).on_change("bright").fill_width()
+        kids.push(row([ icon("sun").size(20.0).padding(8.0), sl2, text((q.bright as Str) + "%").size(12.0).width(fixed(38.0)).text_align(2) ]).spacing(8.0).align_y(1).fill_width())
+    ]
+    if q.bat >= 0 [
+        let bl = tr(c.clone(), "Bateria", "Battery")
+        if q.charging [
+            bl = bl + " · " + tr(c.clone(), "ładowanie", "charging")
+        ]
+        kids.push(row([ icon(battery_icon(q.charging)).size(18.0), text(bl).size(13.0).fill_width(), text((q.bat as Str) + "%").bold().size(13.0) ]).spacing(10.0).align_y(1).fill_width().padding_xy(8.0, 2.0))
+    ]
+    let card = solid_card(column(kids).spacing(12.0).fill_width(), th.clone(), 360.0)
+    end stack([ backdrop(false), place_top_right(card, c.clone()) ])
+]
+
+fun quick_load() -> Quick [
+    let c = conf_load()
+    end Quick(vol_get(), vol_muted(), bright_get(), net_get(), bt_on(), battery_pct(), battery_charging_now(), is_dark(c.clone()), cget_b(c.clone(), "notify.dnd"))
+]
+
+!! ============================================================================
+!! KALENDARZ
+!! ============================================================================
+!! dzien tygodnia (0 = niedziela) - algorytm Sakamoto
+fun dow(y: Int, m: Int, d: Int) -> Int [
+    let t = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4]
+    let yy = y
+    if m < 3 [
+        yy = y - 1
+    ]
+    end (yy + yy / 4 - yy / 100 + yy / 400 + t[m - 1] + d) % 7
+]
+
+fun days_in(y: Int, m: Int) -> Int [
+    let dm = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if m == 2 and ((y % 4 == 0 and y % 100 != 0) or y % 400 == 0) [
+        end 29
+    ]
+    end dm[m - 1]
+]
+
+fun calendar_ui(c: Conf, th: Theme, y: Int, mon: Int, today: Clock) -> Element [
+    let head = row([ button("").with_icon("chevron-left").on_press("prev").class("ghost icon"), text(month_name(c.clone(), mon - 1, true) + " " + (y as Str)).bold().size(15.0).text_align(1).fill_width(), button("").with_icon("chevron-right").on_press("next").class("ghost icon") ]).align_y(1).fill_width()
+    let kids: List<Element> = [ head ]
+    let names = row([ cal_cell(wday_name(c.clone(), 1, false), false, false, th.clone()), cal_cell(wday_name(c.clone(), 2, false), false, false, th.clone()), cal_cell(wday_name(c.clone(), 3, false), false, false, th.clone()), cal_cell(wday_name(c.clone(), 4, false), false, false, th.clone()), cal_cell(wday_name(c.clone(), 5, false), false, false, th.clone()), cal_cell(wday_name(c.clone(), 6, false), false, false, th.clone()), cal_cell(wday_name(c.clone(), 0, false), false, false, th.clone()) ]).spacing(2.0)
+    kids.push(names)
+    let first = (dow(y, mon, 1) + 6) % 7
+    let total = days_in(y, mon)
+    let day = 1 - first
+    let wk = 0
+    while wk < 6 [
+        let cells: List<Element> = []
+        let d = 0
+        while d < 7 [
+            if day >= 1 and day <= total [
+                let is_today = day == today.day and mon == today.mon + 1 and y == today.year
+                cells.push(cal_cell(day as Str, true, is_today, th.clone()))
+            ] else [
+                cells.push(cal_cell("", false, false, th.clone()))
+            ]
+            day = day + 1
+            d = d + 1
+        ]
+        kids.push(row(cells).spacing(2.0))
+        wk = wk + 1
+    ]
+    let card = solid_card(column(kids).spacing(6.0), th.clone(), 322.0)
+    end stack([ backdrop(false), place_top_center(card, c.clone()) ])
+]
+
+fun cal_cell(label: Str, is_day: Bool, today: Bool, th: Theme) -> Element [
+    let t = text(label).size(13.0).text_align(1)
+    if not is_day [
+        t = t.color(th.p.muted).size(11.0)
+    ]
+    if today [
+        t = t.color(th.p.primary_text).bold()
+    ]
+    let e = container(t).center()
+    e = e.size_px(40.0, 34.0).radius(th.radius)
+    if today [
+        e = e.background(th.p.primary)
+    ]
+    end e
+]
+
+fun run_popup(kind: Str) [
+    if hw_single("popup", 0) == 0 [
+        end
+    ]
+    let c = conf_load()
+    let th = hw_theme(c.clone())
+    let app = popup_app(c.clone())
+    let id = app.open_window("layer", "hwde-" + kind, 0, 0, overlay_opts("hwde-popup"))
+    if id < 0 [
+        log("wymaga kompozytora z wlr-layer-shell")
+        end
+    ]
+    let q = quick_load()
+    let today = clock_now()
+    let cy = today.year
+    let cm = today.mon + 1
+    app.set_tick(1000)
+    while app.running() [
+        let ui = quick_ui(c.clone(), th.clone(), q.clone())
+        if kind == "calendar" [
+            ui = calendar_ui(c.clone(), th.clone(), cy, cm, today.clone())
+        ]
+        for m in app.frame1(ui) [
+            if m.id == "bg" [
+                app.quit()
+            ]
+            if m.id == "key" and m.text == "Escape" [
+                app.quit()
+            ]
+            if m.id == "prev" [
+                cm = cm - 1
+                if cm < 1 [
+                    cm = 12
+                    cy = cy - 1
+                ]
+            ]
+            if m.id == "next" [
+                cm = cm + 1
+                if cm > 12 [
+                    cm = 1
+                    cy = cy + 1
+                ]
+            ]
+            if m.id == "vol" [
+                q.vol = fround(m.num) as Int
+                vol_set(q.vol)
+            ]
+            if m.id == "bright" [
+                q.bright = fround(m.num) as Int
+                bright_set(q.bright)
+            ]
+            if m.id == "mute" [
+                vol_toggle_mute()
+                q.muted = vol_muted()
+            ]
+            if m.id == "t_wifi" [
+                wifi_set(not q.net.wifi_on)
+                q.net.wifi_on = not q.net.wifi_on
+            ]
+            if m.id == "t_bt" [
+                bt_set(not q.bt)
+                q.bt = not q.bt
+            ]
+            if m.id == "t_dark" [
+                let nc = conf_load()
+                if q.dark [
+                    cset(nc, "appearance.mode", "light")
+                ] else [
+                    cset(nc, "appearance.mode", "dark")
+                ]
+                conf_save(nc.clone())
+                q.dark = not q.dark
+                c = nc.clone()
+                th = hw_theme(nc.clone())
+                app.set_theme(th.clone())
+                app.set_css(hw_css(nc.clone(), th.clone()))
+            ]
+            if m.id == "t_dnd" [
+                let nc2 = conf_load()
+                cset_b(nc2, "notify.dnd", not q.dnd)
+                conf_save(nc2.clone())
+                q.dnd = not q.dnd
+            ]
+            if m.id == "settings" [
+                gui_spawn(hw_self(), ["settings"])
+                app.quit()
+            ]
+            if m.id == "lock" [
+                do_lock()
+                app.quit()
+            ]
+            if m.id == "power" [
+                gui_spawn(hw_self(), ["power"])
+                app.quit()
+            ]
+        ]
+    ]
+    hw_single_done("popup")
+]
+
+!! ============================================================================
+!! MENU ZASILANIA
+!! ============================================================================
+fun power_tile(label: Str, ic: Str, msg: Str, key: Str, th: Theme, danger: Bool) -> Element [
+    let fg = th.p.text
+    if danger [
+        fg = th.p.danger
+    ]
+    let inner = column([ icon(ic).size(28.0).color(fg), text(label).size(13.0).bold().color(fg), text(key).size(11.0).color(th.p.muted) ]).spacing(6.0).align_x(1)
+    let b = button_with(inner).on_press(msg).class("ghost").padding_xy(8.0, 16.0).size_px(104.0, 100.0).radius(th.radius).background(th.p.surface2)
+    end b
+]
+
+fun power_ui(c: Conf, th: Theme) -> Element [
+    let tiles = row([ power_tile(tr(c.clone(), "Zablokuj", "Lock"), "lock", "p_lock", "L", th.clone(), false), power_tile(tr(c.clone(), "Uśpij", "Sleep"), "moon", "p_sleep", "S", th.clone(), false), power_tile(tr(c.clone(), "Wyloguj", "Log out"), "log-out", "p_logout", "O", th.clone(), false), power_tile(tr(c.clone(), "Restart", "Restart"), "refresh-cw", "p_reboot", "R", th.clone(), false), power_tile(tr(c.clone(), "Wyłącz", "Shut down"), "power", "p_off", "P", th.clone(), true) ]).spacing(10.0)
+    let box = column([ text(tr(c.clone(), "Zasilanie", "Power")).bold().size(16.0), tiles ]).spacing(16.0).align_x(1)
+    let card = solid_card(box, th.clone(), 600.0)
+    let pos = container(card).fill_all().center()
+    end stack([ backdrop(true), pos ])
+]
+
+fun run_power() [
+    if hw_single("popup", 0) == 0 [
+        end
+    ]
+    let c = conf_load()
+    let th = hw_theme(c.clone())
+    let app = popup_app(c.clone())
+    let id = app.open_window("layer", "hwde-power", 0, 0, overlay_opts("hwde-power"))
+    if id < 0 [
+        end
+    ]
+    while app.running() [
+        for m in app.frame1(power_ui(c.clone(), th.clone())) [
+            let act = ""
+            if m.id == "bg" [
+                app.quit()
+            ]
+            if m.id == "key" [
+                if m.text == "Escape" [
+                    app.quit()
+                ]
+                if m.text == "l" [
+                    act = "p_lock"
+                ]
+                if m.text == "s" [
+                    act = "p_sleep"
+                ]
+                if m.text == "o" [
+                    act = "p_logout"
+                ]
+                if m.text == "r" [
+                    act = "p_reboot"
+                ]
+                if m.text == "p" [
+                    act = "p_off"
+                ]
+            ]
+            if s_starts(m.id.clone(), "p_") [
+                act = m.id.clone()
+            ]
+            if act == "p_lock" [
+                do_lock()
+                app.quit()
+            ]
+            if act == "p_sleep" [
+                do_lock()
+                hw_sleep_ms(300)
+                do_suspend()
+                app.quit()
+            ]
+            if act == "p_logout" [
+                do_logout()
+                app.quit()
+            ]
+            if act == "p_reboot" [
+                do_reboot()
+                app.quit()
+            ]
+            if act == "p_off" [
+                do_poweroff()
+                app.quit()
+            ]
+        ]
+    ]
+    hw_single_done("popup")
+]
+
+!! ============================================================================
+!! OSD: hwde osd volume +5 | volume -5 | mute | brightness +5 | brightness -5
+!! ============================================================================
+fun osd_ui(th: Theme, ic: Str, value: Int) -> Element [
+    let inner = row([ icon(ic).size(22.0), progress_bar(0.0, 100.0, fclamp(value as Float, 0.0, 100.0)).width(fixed(190.0)), text((value as Str) + "%").bold().size(13.0).width(fixed(42.0)).text_align(2) ]).spacing(14.0).align_y(1)
+    let e = container(inner)
+    end e.padding_xy(20.0, 14.0).radius(999.0).background(th.p.surface).border(1.0, th.p.border).shadow(22.0, 6.0, th.p.shadow).margin(10.0)
+]
+
+fun run_osd(a: List<Str>) [
+    hw_single("osd", 1)
+    let c = conf_load()
+    let th = hw_theme(c.clone())
+    let what = "volume"
+    let arg = "+5"
+    if a.len() > 1 [
+        what = a[1].clone()
+    ]
+    if a.len() > 2 [
+        arg = a[2].clone()
+    ]
+    let ic = "volume-2"
+    let value = 0
+    if what == "brightness" [
+        let cur = bright_get()
+        if cur < 0 [
+            hw_single_done("osd")
+            end
+        ]
+        let step = parse_i(arg.clone())
+        value = iclamp(cur + step, 1, 100)
+        bright_set(value)
+        ic = "sun"
+    ] else [
+        if what == "mute" [
+            vol_toggle_mute()
+        ] else [
+            let cur2 = vol_get()
+            if vol_muted() and parse_i(arg.clone()) > 0 [
+                vol_toggle_mute()
+            ]
+            value = iclamp(cur2 + parse_i(arg.clone()), 0, 150)
+            vol_set(value)
+        ]
+        if what == "mute" [
+            value = vol_get()
+        ]
+        ic = vol_icon(value, vol_muted())
+    ]
+    let app = popup_app(c.clone())
+    let edge = "bottom"
+    let mg = "0,0,70,0"
+    let id = app.open_window("layer", "hwde-osd", 330, 80, layer_opts("overlay", edge, 0, mg, "none", "hwde-osd"))
+    if id < 0 [
+        end
+    ]
+    app.set_tick(100)
+    let n = 0
+    while app.running() and n < 14 [
+        for m in app.frame1(osd_ui(th.clone(), ic.clone(), value)) [
+            if m.id == "tick" [
+                n = n + 1
+            ]
+        ]
+    ]
+    hw_single_done("osd")
+]
