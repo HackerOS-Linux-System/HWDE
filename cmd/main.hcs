@@ -1,0 +1,72 @@
+get <bit:gui>
+include <sys>
+include <conf>
+include <sysinfo>
+include <shell>
+include <popups>
+include <lock>
+include <labwc>
+include <settings>
+
+fun main() [
+    let a = args()
+    let cmd = "shell"
+    if a.len() > 0 [
+        cmd = a[0].clone()
+    ]
+    if cmd == "shell" [
+        run_shell()
+    ]
+    if cmd == "launcher" [
+        run_launcher()
+    ]
+    if cmd == "popup" [
+        let kind = "quick"
+        if a.len() > 1 [
+            kind = a[1].clone()
+        ]
+        run_popup(kind)
+    ]
+    if cmd == "power" [
+        run_power()
+    ]
+    if cmd == "osd" [
+        run_osd(a.clone())
+    ]
+    if cmd == "lock" [
+        run_lock()
+    ]
+    if cmd == "settings" [
+        run_settings()
+    ]
+    if cmd == "apply" [
+        labwc_apply(conf_load(), true)
+    ]
+    if cmd == "autostart" [
+        run_autostart()
+    ]
+    if cmd == "notify" [
+        if a.len() > 1 [
+            let body = ""
+            if a.len() > 2 [
+                body = a[2].clone()
+            ]
+            hw_notify_send("hwde", a[1].clone(), body, 1, -1)
+        ]
+    ]
+    if cmd == "config" [
+        !! wypisuje aktualna (scalona z domyslnymi) konfiguracje - mozna zapisac do hwde.conf
+        log(conf_text(conf_load()))
+    ]
+    if cmd == "version" or cmd == "--version" [
+        log("hwde 0.1 (HackerOS Wayland Desktop Environment)")
+    ]
+    if cmd == "help" or cmd == "--help" or cmd == "-h" [
+        log("hwde - HackerOS Wayland Desktop Environment\n\nPOLECENIA\n  shell          panel, tapeta, powiadomienia, blokada po bezczynnosci (uruchamiane przez autostart)\n  launcher       launcher aplikacji (przelacznik)\n  popup quick    szybkie ustawienia      popup calendar   kalendarz\n  power          menu zasilania          lock             ekran blokady\n  osd volume +5 | volume -5 | mute | brightness +5 | brightness -5\n  settings       aplikacja Ustawienia\n  run <rola>     terminal | browser | files | editor | screenshot\n  notify <tytul> [tresc]   wyslij powiadomienie\n  apply          wygeneruj konfiguracje labwc z hwde.conf i przeladuj labwc\n  config         wypisz biezaca konfiguracje\n  autostart      uruchamiane przez labwc: skala ekranu, polkit, autostart, powloka")
+    ]
+    if cmd == "run" [
+        if a.len() > 1 [
+            run_role(conf_load(), a[1].clone())
+        ]
+    ]
+]
