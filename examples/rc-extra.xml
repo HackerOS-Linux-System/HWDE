@@ -1,0 +1,5 @@
+  <windowRules>
+    <windowRule identifier="foot" matchOnce="true">
+      <action name="ToggleMaximize" />
+    </windowRule>
+  </windowRules>
