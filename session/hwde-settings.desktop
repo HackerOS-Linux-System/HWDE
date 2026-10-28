@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Ustawienia HWDE
+Name[en]=HWDE Settings
+Comment=Wyglad, panel, okna, wejscie, ekran, skroty
+Comment[en]=Appearance, panel, windows, input, display, shortcuts
+Exec=hwde settings
+Icon=preferences-system
+Terminal=false
+Type=Application
+Categories=Settings;DesktopSettings;
