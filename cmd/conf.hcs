@@ -1,0 +1,558 @@
+get <bit:gui>
+include <sys>
+
+!! ============================================================================
+!! HWDE - konfiguracja (~/.config/hwde/hwde.conf), tlumaczenia, motyw i CSS
+!! ============================================================================
+
+struct Conf [
+    kv: Dict<Str, Str>,
+    lang: Str,
+    path: Str
+]
+
+!! ---------------------------------------------------------------- sciezki
+fun home_dir() -> Str [
+    let h = gui_env("HOME")
+    if h == "" [
+        end "/tmp"
+    ]
+    end h
+]
+
+fun conf_dir() -> Str [
+    let x = gui_env("XDG_CONFIG_HOME")
+    if x == "" [
+        end home_dir() + "/.config/hwde"
+    ]
+    end x + "/hwde"
+]
+
+fun conf_path() -> Str [
+    end conf_dir() + "/hwde.conf"
+]
+
+fun css_path() -> Str [
+    end conf_dir() + "/custom.css"
+]
+
+fun labwc_dir() -> Str [
+    let x = gui_env("XDG_CONFIG_HOME")
+    if x == "" [
+        end home_dir() + "/.config/labwc"
+    ]
+    end x + "/labwc"
+]
+
+!! ---------------------------------------------------------------- wartosci domyslne ("sekcja.klucz=wartosc")
+fun defaults() -> List<Str> [
+    end [
+        "general.language=auto",
+        "appearance.mode=dark",
+        "appearance.accent=neutral",
+        "appearance.radius=10",
+        "appearance.font_scale=100",
+        "appearance.panel_opacity=94",
+        "appearance.animations=1",
+        "panel.position=top",
+        "panel.floating=1",
+        "panel.height=38",
+        "panel.margin=6",
+        "panel.left=launcher,tasks",
+        "panel.center=clock",
+        "panel.right=status,power",
+        "panel.clock=24h",
+        "panel.seconds=0",
+        "panel.date=1",
+        "panel.max_tasks=8",
+        "wallpaper.mode=gradient",
+        "wallpaper.color1=",
+        "wallpaper.color2=",
+        "wallpaper.angle=160",
+        "wallpaper.image=",
+        "windows.titlebar=icon:iconify,max,close",
+        "windows.corner_radius=10",
+        "windows.border=1",
+        "windows.shadows=1",
+        "windows.gap=0",
+        "windows.snap=1",
+        "windows.focus_follows_mouse=0",
+        "windows.workspaces=1",
+        "windows.font=sans",
+        "windows.font_size=10",
+        "input.layout=us",
+        "input.variant=",
+        "input.options=",
+        "input.repeat_rate=30",
+        "input.repeat_delay=400",
+        "input.numlock=1",
+        "input.tap=1",
+        "input.natural_scroll=0",
+        "input.pointer_speed=0",
+        "input.accel=adaptive",
+        "input.disable_while_typing=1",
+        "notify.enabled=1",
+        "notify.dnd=0",
+        "notify.timeout=6",
+        "notify.max=4",
+        "lock.timeout=10",
+        "lock.screen_off=15",
+        "apps.terminal=",
+        "apps.browser=",
+        "apps.files=",
+        "apps.editor=",
+        "keys.W-Return=exec:hwde run terminal",
+        "keys.W-d=exec:hwde launcher",
+        "keys.W-space=exec:hwde launcher",
+        "keys.W-e=exec:hwde run files",
+        "keys.W-b=exec:hwde run browser",
+        "keys.W-comma=exec:hwde settings",
+        "keys.W-l=exec:hwde lock",
+        "keys.W-q=action:Close",
+        "keys.A-F4=action:Close",
+        "keys.W-f=action:ToggleFullscreen",
+        "keys.W-Up=action:ToggleMaximize",
+        "keys.W-Down=action:Iconify",
+        "keys.W-Left=action:SnapToEdge:direction=left",
+        "keys.W-Right=action:SnapToEdge:direction=right",
+        "keys.A-Tab=action:NextWindow",
+        "keys.A-S-Tab=action:PreviousWindow",
+        "keys.W-1=action:GoToDesktop:to=1",
+        "keys.W-2=action:GoToDesktop:to=2",
+        "keys.W-3=action:GoToDesktop:to=3",
+        "keys.W-4=action:GoToDesktop:to=4",
+        "keys.C-A-Delete=exec:hwde power",
+        "keys.Print=exec:hwde run screenshot",
+        "keys.XF86AudioRaiseVolume=exec:hwde osd volume +5",
+        "keys.XF86AudioLowerVolume=exec:hwde osd volume -5",
+        "keys.XF86AudioMute=exec:hwde osd mute",
+        "keys.XF86MonBrightnessUp=exec:hwde osd brightness +5",
+        "keys.XF86MonBrightnessDown=exec:hwde osd brightness -5"
+    ]
+]
+
+fun split_kv(line: Str) -> List<Str> [
+    let i = s_find(line.clone(), "=")
+    let out: List<Str> = []
+    if i < 0 [
+        end out
+    ]
+    out.push(s_sub(line.clone(), 0, i))
+    out.push(s_sub(line.clone(), i + 1, slen(line.clone())))
+    end out
+]
+
+fun trim(s: Str) -> Str [
+    let a = 0
+    let b = slen(s.clone())
+    while a < b and (s.char_at(a) == " " or s.char_at(a) == "\t" or s.char_at(a) == "\r") [
+        a = a + 1
+    ]
+    while b > a and (s.char_at(b - 1) == " " or s.char_at(b - 1) == "\t" or s.char_at(b - 1) == "\r") [
+        b = b - 1
+    ]
+    end s_sub(s.clone(), a, b)
+]
+
+fun conf_default() -> Conf [
+    let kv: Dict<Str, Str> = dict()
+    let d = defaults()
+    let i = 0
+    while i < d.len() [
+        let p = split_kv(d[i].clone())
+        if p.len() == 2 [
+            kv.insert(p[0].clone(), p[1].clone())
+        ]
+        i = i + 1
+    ]
+    end Conf(kv, "pl", conf_path())
+]
+
+!! ---------------------------------------------------------------- odczyt / zapis
+fun cget(c: Conf, k: Str) -> Str [
+    match c.kv.fetch(k) [
+        Some(v) -> [
+            end v
+        ]
+        None -> [
+            end ""
+        ]
+    ]
+    end ""
+]
+
+fun cget_i(c: Conf, k: Str) -> Int [
+    end parse_i(cget(c.clone(), k))
+]
+
+fun cget_f(c: Conf, k: Str) -> Float [
+    end parse_f(cget(c.clone(), k))
+]
+
+fun cget_b(c: Conf, k: Str) -> Bool [
+    let v = cget(c.clone(), k)
+    end v == "1" or v == "true" or v == "yes" or v == "on"
+]
+
+fun cset(c: Conf, k: Str, v: Str) [
+    c.kv.insert(k, v)
+]
+
+fun cset_b(c: Conf, k: Str, v: Bool) [
+    if v [
+        c.kv.insert(k, "1")
+    ] else [
+        c.kv.insert(k, "0")
+    ]
+]
+
+fun resolve_lang(c: Conf) -> Str [
+    let l = cget(c.clone(), "general.language")
+    if l == "pl" or l == "en" [
+        end l
+    ]
+    let e = gui_env("LC_ALL")
+    if e == "" [
+        e = gui_env("LC_MESSAGES")
+    ]
+    if e == "" [
+        e = gui_env("LANG")
+    ]
+    if s_starts(e.clone(), "pl") [
+        end "pl"
+    ]
+    end "en"
+]
+
+fun conf_parse(c: Conf, text: Str) [
+    let sec = ""
+    let lines = s_split(text, "\n")
+    let i = 0
+    while i < lines.len() [
+        let ln = trim(lines[i].clone())
+        if slen(ln.clone()) > 0 and ln.char_at(0) != "#" and ln.char_at(0) != ";" [
+            if ln.char_at(0) == "[" [
+                let e = s_find(ln.clone(), "]")
+                if e > 1 [
+                    sec = trim(s_sub(ln.clone(), 1, e))
+                ]
+            ] else [
+                let p = split_kv(ln.clone())
+                if p.len() == 2 and sec != "" [
+                    c.kv.insert(sec + "." + trim(p[0].clone()), trim(p[1].clone()))
+                ]
+            ]
+        ]
+        i = i + 1
+    ]
+]
+
+fun conf_load() -> Conf [
+    let c = conf_default()
+    let t = gui_read_file(conf_path())
+    if slen(t.clone()) > 0 [
+        conf_parse(c, t)
+    ]
+    c.lang = resolve_lang(c.clone())
+    end c
+]
+
+fun sec_of(key: Str) -> Str [
+    let i = s_find(key.clone(), ".")
+    if i < 0 [
+        end ""
+    ]
+    end s_sub(key.clone(), 0, i)
+]
+
+fun key_of(key: Str) -> Str [
+    let i = s_find(key.clone(), ".")
+    end s_sub(key.clone(), i + 1, slen(key.clone()))
+]
+
+fun list_has(l: List<Str>, v: Str) -> Bool [
+    let i = 0
+    while i < l.len() [
+        if l[i] == v [
+            end true
+        ]
+        i = i + 1
+    ]
+    end false
+]
+
+fun conf_text(c: Conf) -> Str [
+    let out = "# HWDE - konfiguracja. Mozna edytowac recznie; powloka przeladowuje plik sama.\n# Skladnia: [sekcja] i klucz = wartosc. Dodatkowy CSS: custom.css w tym katalogu.\n"
+    let order = defaults()
+    let seen: List<Str> = []
+    let last = ""
+    let i = 0
+    while i < order.len() [
+        let p = split_kv(order[i].clone())
+        let k = p[0].clone()
+        seen.push(k.clone())
+        if sec_of(k.clone()) != last [
+            last = sec_of(k.clone())
+            out = out + "\n[" + last + "]\n"
+        ]
+        out = out + key_of(k.clone()) + " = " + cget(c.clone(), k.clone()) + "\n"
+        i = i + 1
+    ]
+    !! klucze uzytkownika spoza domyslnych (autostart, wlasne skroty, ustawienia ekranow)
+    let keys = c.kv.keys()
+    let extra: List<Str> = []
+    let j = 0
+    while j < keys.len() [
+        if not list_has(seen.clone(), keys[j].clone()) [
+            extra.push(keys[j].clone())
+        ]
+        j = j + 1
+    ]
+    let sorted = sort_strs(extra)
+    let k2 = 0
+    while k2 < sorted.len() [
+        out = out + "\n[" + sec_of(sorted[k2].clone()) + "]\n" + key_of(sorted[k2].clone()) + " = " + cget(c.clone(), sorted[k2].clone()) + "\n"
+        k2 = k2 + 1
+    ]
+    end out
+]
+
+fun sort_strs(l: List<Str>) -> List<Str> [
+    let a: List<Str> = []
+    let i = 0
+    while i < l.len() [
+        a.push(l[i].clone())
+        i = i + 1
+    ]
+    let n = a.len()
+    let x = 0
+    while x < n [
+        let y = 0
+        while y + 1 < n - x [
+            if a[y] > a[y + 1] [
+                let t = a[y].clone()
+                a[y] = a[y + 1].clone()
+                a[y + 1] = t
+            ]
+            y = y + 1
+        ]
+        x = x + 1
+    ]
+    end a
+]
+
+fun conf_save(c: Conf) -> Bool [
+    gui_run("mkdir", ["-p", conf_dir()])
+    end gui_write_file(conf_path(), conf_text(c.clone())) == 0
+]
+
+!! ---------------------------------------------------------------- tlumaczenia: tr(c, "po polsku", "in English")
+fun tr(c: Conf, pl: Str, en: Str) -> Str [
+    if c.lang == "pl" [
+        end pl
+    ]
+    end en
+]
+
+!! ---------------------------------------------------------------- czas
+struct Clock [
+    h: Int,
+    m: Int,
+    s: Int,
+    wd: Int,
+    day: Int,
+    mon: Int,
+    year: Int
+]
+
+fun clock_now() -> Clock [
+    let p = s_split(hw_time(), ",")
+    if p.len() < 7 [
+        end Clock(0, 0, 0, 0, 1, 0, 2026)
+    ]
+    end Clock(parse_i(p[0].clone()), parse_i(p[1].clone()), parse_i(p[2].clone()), parse_i(p[3].clone()), parse_i(p[4].clone()), parse_i(p[5].clone()), parse_i(p[6].clone()))
+]
+
+fun wday_name(c: Conf, wd: Int, long: Bool) -> Str [
+    let pl_s = ["nd", "pn", "wt", "śr", "cz", "pt", "sb"]
+    let pl_l = ["niedziela", "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota"]
+    let en_s = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    let en_l = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    let i = iclamp(wd, 0, 6)
+    if c.lang == "pl" [
+        if long [
+            end pl_l[i].clone()
+        ]
+        end pl_s[i].clone()
+    ]
+    if long [
+        end en_l[i].clone()
+    ]
+    end en_s[i].clone()
+]
+
+fun month_name(c: Conf, mon: Int, long: Bool) -> Str [
+    let pl_s = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"]
+    let pl_l = ["styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec", "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień"]
+    let en_s = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    let en_l = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    let i = iclamp(mon, 0, 11)
+    if c.lang == "pl" [
+        if long [
+            end pl_l[i].clone()
+        ]
+        end pl_s[i].clone()
+    ]
+    if long [
+        end en_l[i].clone()
+    ]
+    end en_s[i].clone()
+]
+
+fun clock_text(c: Conf, k: Clock) -> Str [
+    let secs = cget_b(c.clone(), "panel.seconds")
+    if cget(c.clone(), "panel.clock") == "12h" [
+        let h = k.h % 12
+        if h == 0 [
+            h = 12
+        ]
+        let sfx = " AM"
+        if k.h >= 12 [
+            sfx = " PM"
+        ]
+        let t = (h as Str) + ":" + pad2(k.m)
+        if secs [
+            t = t + ":" + pad2(k.s)
+        ]
+        end t + sfx
+    ]
+    let t2 = pad2(k.h) + ":" + pad2(k.m)
+    if secs [
+        t2 = t2 + ":" + pad2(k.s)
+    ]
+    end t2
+]
+
+fun date_text(c: Conf, k: Clock) -> Str [
+    end wday_name(c.clone(), k.wd, false) + " " + (k.day as Str) + " " + month_name(c.clone(), k.mon, false)
+]
+
+fun date_long(c: Conf, k: Clock) -> Str [
+    end wday_name(c.clone(), k.wd, true) + ", " + (k.day as Str) + " " + month_name(c.clone(), k.mon, true) + " " + (k.year as Str)
+]
+
+!! ---------------------------------------------------------------- motyw
+fun is_dark(c: Conf) -> Bool [
+    let m = cget(c.clone(), "appearance.mode")
+    if m == "light" [
+        end false
+    ]
+    if m == "auto" [
+        let k = clock_now()
+        end k.h < 7 or k.h >= 19
+    ]
+    end true
+]
+
+fun accent_hex(name: Str, dark: Bool) -> Str [
+    if name == "blue" [
+        end "#3b82f6"
+    ]
+    if name == "green" [
+        end "#22c55e"
+    ]
+    if name == "red" [
+        end "#ef4444"
+    ]
+    if name == "orange" [
+        end "#f97316"
+    ]
+    if name == "purple" [
+        end "#8b5cf6"
+    ]
+    if name == "pink" [
+        end "#ec4899"
+    ]
+    if name == "teal" [
+        end "#14b8a6"
+    ]
+    if name == "yellow" [
+        end "#eab308"
+    ]
+    if s_starts(name.clone(), "#") [
+        end name
+    ]
+    if dark [
+        end "#e4e4e7"
+    ]
+    end "#18181b"
+]
+
+fun on_color(bg: Int) -> Int [
+    let l = (col_r(bg) * 299 + col_g(bg) * 587 + col_b(bg) * 114) / 1000
+    if l > 150 [
+        end parse_color("#111113")
+    ]
+    end parse_color("#fafafa")
+]
+
+fun hw_theme(c: Conf) -> Theme [
+    let dark = is_dark(c.clone())
+    let acc = parse_color(accent_hex(cget(c.clone(), "appearance.accent"), dark))
+    let op = cget_i(c.clone(), "appearance.panel_opacity")
+    let p = Palette(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    if dark [
+        p = Palette(parse_color("#111113"), parse_color("#18181b"), parse_color("#232326"), parse_color("#303035"), parse_color("#0b0b0c"), parse_color("#f4f4f5"), parse_color("#a1a1aa"), parse_color("#71717a"), acc, on_color(acc), parse_color("#4ade80"), parse_color("#fbbf24"), parse_color("#f87171"), parse_color("#93c5fd"), rgba(255, 255, 255, 24), rgba(0, 0, 0, 150))
+    ] else [
+        p = Palette(parse_color("#f4f4f5"), parse_color("#ffffff"), parse_color("#ececee"), parse_color("#dcdce0"), parse_color("#e4e4e7"), parse_color("#18181b"), parse_color("#52525b"), parse_color("#a1a1aa"), acc, on_color(acc), parse_color("#16a34a"), parse_color("#d97706"), parse_color("#dc2626"), parse_color("#2563eb"), rgba(0, 0, 0, 26), rgba(24, 24, 40, 64))
+    ]
+    let name = "hwde-light"
+    if dark [
+        name = "hwde-dark"
+    ]
+    let t = make_theme(name, p, dark, false)
+    let r = cget_f(c.clone(), "appearance.radius")
+    t.radius = r
+    t.radius_lg = r + 6.0
+    let fs = cget_f(c.clone(), "appearance.font_scale") / 100.0
+    if fs < 0.6 [
+        fs = 1.0
+    ]
+    t.font = 14.0 * fs
+    t.font_sm = 12.0 * fs
+    t.font_lg = 17.0 * fs
+    t.font_title = 26.0 * fs
+    if not cget_b(c.clone(), "appearance.animations") [
+        t.anim_ms = 1.0
+    ]
+    if op < 30 [
+        op = 94
+    ]
+    end t
+]
+
+fun panel_bg(c: Conf, th: Theme) -> Int [
+    let op = cget_i(c.clone(), "appearance.panel_opacity")
+    if op < 30 or op > 100 [
+        op = 94
+    ]
+    end with_alpha(th.p.surface, (op * 255) / 100)
+]
+
+!! arkusz CSS: wspolny wyglad (okragle przyciski, delikatne cienie) + wlasny custom.css uzytkownika
+fun hw_css(c: Conf, th: Theme) -> Str [
+    let r = (th.radius as Int) as Str
+    let css = ".card { border-radius: " + r + "px; }\n"
+    css = css + "button { border-radius: " + r + "px; }\n"
+    css = css + "button.pill { border-radius: 999px; }\n"
+    css = css + "button.primary { font-weight: 600; }\n"
+    css = css + "text_input { border-radius: " + r + "px; }\n"
+    css = css + "button.bare, button.bare:hover, button.bare:active { background: rgba(0,0,0,0); }\n"
+    css = css + "button.dim, button.dim:hover, button.dim:active { background: rgba(0,0,0,0.38); }\n"
+    let user = gui_read_file(css_path())
+    end css + user
+]
+
+fun conf_mtime_sum() -> Int [
+    end hw_mtime(conf_path()) + hw_mtime(css_path())
+]
