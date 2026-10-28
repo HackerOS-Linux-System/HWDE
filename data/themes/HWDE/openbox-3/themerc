@@ -1,0 +1,8 @@
+# HWDE - motyw bazowy labwc.
+# Kolory i wymiary nadpisuje ~/.config/labwc/themerc-override, generowany przez
+# "hwde apply" (aplikacja Ustawienia) z ~/.config/hwde/hwde.conf.
+border.width: 1
+padding.width: 6
+padding.height: 4
+window.titlebar.padding.height: 6
+window.label.text.justify: left
