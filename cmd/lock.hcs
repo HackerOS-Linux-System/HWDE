@@ -1,0 +1,97 @@
+get <bit:gui>
+include <sys>
+include <conf>
+include <sysinfo>
+include <shell>
+include <popups>
+
+!! ============================================================================
+!! hwde lock - ekran blokady (ext-session-lock-v1). Haslo weryfikuje unix_chkpwd
+!! (czesc PAM: pam_unix), wiec nie potrzeba dodatkowych bibliotek.
+!! Gdy proces blokady zginie, kompozytor nadal trzyma sesje zablokowana.
+!! ============================================================================
+fun lock_ui(c: Conf, th: Theme, k: Clock, pw: Str, msg: Str, busy: Bool) -> Element [
+    let cols = wall_colors(c.clone(), th.clone())
+    let user = hw_user()
+    let field = text_input(tr(c.clone(), "Hasło", "Password"), pw).id("pw").secret().on_input("pw").on_submit("unlock").width(fixed(300.0))
+    let hint = text(msg).size(13.0).color(th.p.danger)
+    let box = column([ text(clock_text(c.clone(), k)).size(88.0).bold().color(rgb(250, 250, 250)), text(date_long(c.clone(), k)).size(18.0).color(rgba(250, 250, 250, 190)), vspace(34.0), avatar(initial_of(user.clone()), 72.0, th.clone()), text(user.clone()).bold().size(16.0).color(rgb(250, 250, 250)), vspace(4.0), field, hint ]).spacing(8.0).align_x(1)
+    let bg = container(box).fill_all().center().gradient(cols[0], cols[1], cget_f(c.clone(), "wallpaper.angle"))
+    if th.dark [
+        end bg
+    ]
+    !! na jasnym motywie przyciemniamy tlo, zeby bialy zegar byl czytelny
+    end container(box).fill_all().center().gradient(rgb(70, 70, 78), rgb(24, 24, 28), 160.0)
+]
+
+fun run_lock() [
+    if hw_single("lock", 2) == 0 [
+        end
+    ]
+    let c = conf_load()
+    let th = hw_theme(c.clone())
+    let app = popup_app(c.clone())
+    if app.backend == "headless" or s_starts(app.backend.clone(), "error") [
+        log("hwde lock wymaga kompozytora Wayland z ext-session-lock")
+        hw_single_done("lock")
+        end
+    ]
+    app.set_tick(1000)
+    if gui_session_lock(1) != 1 [
+        log("kompozytor nie wspiera ext-session-lock-v1")
+        hw_single_done("lock")
+        end
+    ]
+    let user = hw_user()
+    let pw = ""
+    let msg = ""
+    let done = false
+    let opened = false
+    let k = clock_now()
+    let fails = 0
+    let focus_win = -1
+    while app.running() and not done [
+        if not opened [
+            let id = app.open_window("lock", "lock", 0, 0, "")
+            opened = id >= 0
+        ]
+        let uis: List<Element> = []
+        for id2 in app.window_ids() [
+            uis.push(lock_ui(c.clone(), th.clone(), k.clone(), pw.clone(), msg.clone(), false))
+        ]
+        for m in app.frame(uis) [
+            if m.id == "tick" [
+                k = clock_now()
+            ]
+            if m.id == "pw" [
+                pw = m.text.clone()
+                msg = ""
+            ]
+            if m.id == "unlock" [
+                let r = hw_chkpw(user.clone(), pw.clone())
+                if r == 1 [
+                    done = true
+                ] elif r == 0 [
+                    fails = fails + 1
+                    msg = tr(c.clone(), "Nieprawidłowe hasło", "Wrong password")
+                    pw = ""
+                    if fails >= 3 [
+                        hw_sleep_ms(1500)
+                    ]
+                ] else [
+                    msg = tr(c.clone(), "Brak unix_chkpwd - nie można zweryfikować hasła", "unix_chkpwd missing - cannot verify password")
+                    pw = ""
+                ]
+            ]
+            if m.id == "lock" and m.text == "finished" [
+                done = true
+            ]
+        ]
+        if opened and app.window_ids().len() > 0 and focus_win != app.window_ids()[0] [
+            focus_win = app.window_ids()[0]
+            app.focus_id(focus_win, "pw")
+        ]
+    ]
+    gui_session_lock(0)
+    hw_single_done("lock")
+]
