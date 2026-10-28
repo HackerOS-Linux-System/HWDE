@@ -1,0 +1,353 @@
+get <bit:gui>
+include <sys>
+include <conf>
+
+!! ============================================================================
+!! Odczyt i zmiana stanu systemu: dzwiek, jasnosc, siec, bateria, zasilanie
+!! Wszystko przez zwykle programy (wpctl, brightnessctl, nmcli...) - gdy ich brak,
+!! odpowiednie przyciski po prostu sie nie pokazuja.
+!! ============================================================================
+
+fun out_of(cmd: Str, args: List<Str>) -> Str [
+    let s: Str = gui_run(cmd, args)
+    end trim(s)
+]
+
+fun sh(cmd: Str) [
+    gui_spawn("sh", ["-c", cmd])
+]
+
+!! ---------------------------------------------------------------- dzwiek (PipeWire/WirePlumber, zapasowo PulseAudio)
+fun have_wpctl() -> Bool [
+    end hw_which("wpctl")
+]
+
+fun have_pactl() -> Bool [
+    end hw_which("pactl")
+]
+
+fun has_audio() -> Bool [
+    end have_wpctl() or have_pactl()
+]
+
+!! glosnosc 0..150 lub -1
+fun vol_get() -> Int [
+    if have_wpctl() [
+        let o = out_of("wpctl", ["get-volume", "@DEFAULT_AUDIO_SINK@"])
+        if s_starts(o.clone(), "Volume:") [
+            let v = parse_f(trim(s_sub(o.clone(), 7, slen(o.clone()))))
+            end fround(v * 100.0) as Int
+        ]
+        end -1
+    ]
+    if have_pactl() [
+        let o2 = out_of("pactl", ["get-sink-volume", "@DEFAULT_SINK@"])
+        let i = s_find(o2.clone(), "%")
+        if i > 0 [
+            let j = i - 1
+            while j >= 0 and o2.char_at(j) != " " and o2.char_at(j) != "/" [
+                j = j - 1
+            ]
+            end parse_i(trim(s_sub(o2.clone(), j + 1, i)))
+        ]
+    ]
+    end -1
+]
+
+fun vol_muted() -> Bool [
+    if have_wpctl() [
+        let o = out_of("wpctl", ["get-volume", "@DEFAULT_AUDIO_SINK@"])
+        end s_find(o.clone(), "MUTED") >= 0
+    ]
+    if have_pactl() [
+        let o2 = out_of("pactl", ["get-sink-mute", "@DEFAULT_SINK@"])
+        end s_find(o2.clone(), "yes") >= 0
+    ]
+    end false
+]
+
+fun vol_set(p: Int) [
+    let v = iclamp(p, 0, 150)
+    if have_wpctl() [
+        hw_status("wpctl", ["set-volume", "-l", "1.5", "@DEFAULT_AUDIO_SINK@", (v as Str) + "%"])
+        end
+    ]
+    if have_pactl() [
+        hw_status("pactl", ["set-sink-volume", "@DEFAULT_SINK@", (v as Str) + "%"])
+    ]
+]
+
+fun vol_toggle_mute() [
+    if have_wpctl() [
+        hw_status("wpctl", ["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"])
+        end
+    ]
+    if have_pactl() [
+        hw_status("pactl", ["set-sink-mute", "@DEFAULT_SINK@", "toggle"])
+    ]
+]
+
+!! ---------------------------------------------------------------- jasnosc ekranu
+fun backlight_dir() -> Str [
+    let l = s_split(out_of("ls", ["/sys/class/backlight"]), "\n")
+    if l.len() > 0 and slen(l[0].clone()) > 0 [
+        end "/sys/class/backlight/" + l[0]
+    ]
+    end ""
+]
+
+fun has_brightness() -> Bool [
+    end hw_which("brightnessctl") or backlight_dir() != ""
+]
+
+fun bright_get() -> Int [
+    if hw_which("brightnessctl") [
+        let cur = parse_f(out_of("brightnessctl", ["g"]))
+        let mx = parse_f(out_of("brightnessctl", ["m"]))
+        if mx > 0.0 [
+            end fround(cur * 100.0 / mx) as Int
+        ]
+    ]
+    let d = backlight_dir()
+    if d != "" [
+        let cur2 = parse_f(trim(gui_read_file(d + "/brightness")))
+        let mx2 = parse_f(trim(gui_read_file(d + "/max_brightness")))
+        if mx2 > 0.0 [
+            end fround(cur2 * 100.0 / mx2) as Int
+        ]
+    ]
+    end -1
+]
+
+fun bright_set(p: Int) [
+    let v = iclamp(p, 1, 100)
+    if hw_which("brightnessctl") [
+        hw_status("brightnessctl", ["set", (v as Str) + "%"])
+        end
+    ]
+    let d = backlight_dir()
+    if d != "" [
+        let mx = parse_i(trim(gui_read_file(d + "/max_brightness")))
+        gui_write_file(d + "/brightness", ((mx * v) / 100) as Str)
+    ]
+]
+
+!! ---------------------------------------------------------------- siec (NetworkManager)
+fun has_nmcli() -> Bool [
+    end hw_which("nmcli")
+]
+
+struct Net [
+    kind: Str,
+    name: Str,
+    wifi_on: Bool
+]
+
+!! kind: wifi | ethernet | none | unknown
+fun net_get() -> Net [
+    if not has_nmcli() [
+        end Net("unknown", "", false)
+    ]
+    let radio = out_of("nmcli", ["radio", "wifi"])
+    let on = radio == "enabled"
+    let lines = s_split(out_of("nmcli", ["-t", "-f", "TYPE,STATE,CONNECTION", "device"]), "\n")
+    let kind = "none"
+    let name = ""
+    let i = 0
+    while i < lines.len() [
+        let p = s_split(lines[i].clone(), ":")
+        if p.len() >= 3 and p[1] == "connected" [
+            if p[0] == "wifi" [
+                kind = "wifi"
+                name = p[2].clone()
+            ]
+            if p[0] == "ethernet" and kind != "wifi" [
+                kind = "ethernet"
+                name = p[2].clone()
+            ]
+        ]
+        i = i + 1
+    ]
+    end Net(kind, name, on)
+]
+
+fun wifi_set(on: Bool) [
+    if on [
+        hw_status("nmcli", ["radio", "wifi", "on"])
+    ] else [
+        hw_status("nmcli", ["radio", "wifi", "off"])
+    ]
+]
+
+!! ---------------------------------------------------------------- Bluetooth
+fun has_bt() -> Bool [
+    end hw_which("bluetoothctl") or hw_which("rfkill")
+]
+
+fun bt_on() -> Bool [
+    if hw_which("bluetoothctl") [
+        let o = out_of("bluetoothctl", ["show"])
+        end s_find(o.clone(), "Powered: yes") >= 0
+    ]
+    if hw_which("rfkill") [
+        let o2 = out_of("rfkill", ["list", "bluetooth"])
+        end s_find(o2.clone(), "Soft blocked: no") >= 0
+    ]
+    end false
+]
+
+fun bt_set(on: Bool) [
+    if hw_which("bluetoothctl") [
+        if on [
+            hw_status("bluetoothctl", ["power", "on"])
+        ] else [
+            hw_status("bluetoothctl", ["power", "off"])
+        ]
+        end
+    ]
+    if on [
+        hw_status("rfkill", ["unblock", "bluetooth"])
+    ] else [
+        hw_status("rfkill", ["block", "bluetooth"])
+    ]
+]
+
+!! ---------------------------------------------------------------- bateria
+fun battery_pct() -> Int [
+    let names = ["BAT0", "BAT1", "BATT", "battery"]
+    let i = 0
+    while i < names.len() [
+        let t = trim(gui_read_file("/sys/class/power_supply/" + names[i] + "/capacity"))
+        if slen(t.clone()) > 0 [
+            end parse_i(t)
+        ]
+        i = i + 1
+    ]
+    end -1
+]
+
+fun battery_charging_now() -> Bool [
+    let names = ["BAT0", "BAT1", "BATT", "battery"]
+    let i = 0
+    while i < names.len() [
+        let t = gui_read_file("/sys/class/power_supply/" + names[i] + "/status")
+        if s_starts(t.clone(), "Charging") or s_starts(t.clone(), "Full") [
+            end true
+        ]
+        i = i + 1
+    ]
+    end false
+]
+
+!! ---------------------------------------------------------------- zasilanie sesji
+fun do_logout() [
+    sh("labwc --exit || pkill -x labwc")
+]
+
+fun do_suspend() [
+    sh("systemctl suspend || loginctl suspend")
+]
+
+fun do_reboot() [
+    sh("systemctl reboot || loginctl reboot || reboot")
+]
+
+fun do_poweroff() [
+    sh("systemctl poweroff || loginctl poweroff || poweroff")
+]
+
+fun do_lock() [
+    gui_spawn(hw_self(), ["lock"])
+]
+
+!! ---------------------------------------------------------------- aplikacje domyslne: terminal, przegladarka, pliki...
+fun first_available(cands: List<Str>) -> Str [
+    let i = 0
+    while i < cands.len() [
+        if hw_which(cands[i].clone()) [
+            end cands[i].clone()
+        ]
+        i = i + 1
+    ]
+    end ""
+]
+
+fun role_command(c: Conf, role: Str) -> Str [
+    let user = cget(c.clone(), "apps." + role)
+    if user != "" [
+        end user
+    ]
+    if role == "terminal" [
+        let t = first_available(["foot", "alacritty", "kitty", "wezterm", "ghostty", "gnome-terminal", "konsole", "xfce4-terminal", "lxterminal", "xterm"])
+        if t == "" [
+            end "x-terminal-emulator"
+        ]
+        end t
+    ]
+    if role == "browser" [
+        let b = first_available(["firefox", "chromium", "google-chrome", "brave", "librewolf", "falkon", "epiphany"])
+        if b == "" [
+            end "xdg-open https://"
+        ]
+        end b
+    ]
+    if role == "files" [
+        let f = first_available(["thunar", "nautilus", "pcmanfm-qt", "pcmanfm", "dolphin", "nemo", "caja"])
+        if f == "" [
+            end "xdg-open " + home_dir()
+        ]
+        end f
+    ]
+    if role == "editor" [
+        let e = first_available(["gedit", "kate", "mousepad", "gnome-text-editor", "code"])
+        if e == "" [
+            end "xdg-open " + home_dir()
+        ]
+        end e
+    ]
+    if role == "screenshot" [
+        if hw_which("grim") and hw_which("slurp") [
+            end "mkdir -p ~/Pictures && grim -g \"$(slurp)\" ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png"
+        ]
+        if hw_which("grim") [
+            end "mkdir -p ~/Pictures && grim ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png"
+        ]
+        end "true"
+    ]
+    end role
+]
+
+fun run_role(c: Conf, role: Str) [
+    sh(role_command(c.clone(), role))
+]
+
+!! ---------------------------------------------------------------- ikony stanu
+fun vol_icon(v: Int, muted: Bool) -> Str [
+    if v < 0 [
+        end "volume-x"
+    ]
+    if muted or v == 0 [
+        end "volume-x"
+    ]
+    end "volume-2"
+]
+
+fun battery_icon(charging: Bool) -> Str [
+    if charging [
+        end "battery-charging"
+    ]
+    end "battery"
+]
+
+fun net_icon(n: Net) -> Str [
+    if n.kind == "wifi" or n.kind == "ethernet" [
+        if n.kind == "ethernet" [
+            end "globe"
+        ]
+        end "wifi"
+    ]
+    if n.kind == "unknown" [
+        end "wifi"
+    ]
+    end "wifi-off"
+]
