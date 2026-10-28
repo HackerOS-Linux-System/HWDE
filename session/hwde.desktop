@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=HWDE
+Comment=HackerOS Wayland Desktop Environment (labwc)
+Exec=hwde-session
+Type=Application
+DesktopNames=HWDE;wlroots
