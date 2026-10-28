@@ -1,0 +1,705 @@
+get <crates:libc::0.2>
+
+native {Rust} [
+use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
+
+pub fn hw_time() -> String {
+    unsafe {
+        let t = libc::time(std::ptr::null_mut());
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&t, &mut tm);
+        format!("{},{},{},{},{},{},{}", tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_wday, tm.tm_mday, tm.tm_mon, tm.tm_year + 1900)
+    }
+}
+
+pub fn hw_mtime(path: String) -> i64 {
+    match std::fs::metadata(&path).and_then(|m| m.modified()) {
+        Ok(t) => t.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0),
+        Err(_) => -1,
+    }
+}
+
+pub fn hw_self() -> String {
+    std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "hwde".to_string())
+}
+
+pub fn hw_user() -> String {
+    if let Ok(u) = std::env::var("USER") {
+        if !u.is_empty() {
+            return u;
+        }
+    }
+    unsafe {
+        let pw = libc::getpwuid(libc::getuid());
+        if pw.is_null() {
+            return String::new();
+        }
+        std::ffi::CStr::from_ptr((*pw).pw_name).to_string_lossy().to_string()
+    }
+}
+
+pub fn hw_status(cmd: String, args: Vec<String>) -> i64 {
+    match std::process::Command::new(&cmd)
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        Ok(s) => s.code().unwrap_or(-1) as i64,
+        Err(_) => -2,
+    }
+}
+
+pub fn hw_which(cmd: String) -> bool {
+    if cmd.contains('/') {
+        return std::path::Path::new(&cmd).exists();
+    }
+    if let Ok(p) = std::env::var("PATH") {
+        for d in p.split(':') {
+            if !d.is_empty() && std::path::Path::new(d).join(&cmd).is_file() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub fn hw_chkpw(user: String, pw: String) -> i64 {
+    let cands = ["/usr/sbin/unix_chkpwd", "/sbin/unix_chkpwd", "/usr/bin/unix_chkpwd", "/usr/lib/unix_chkpwd", "/usr/libexec/unix_chkpwd"];
+    for c in cands {
+        if !std::path::Path::new(c).exists() {
+            continue;
+        }
+        let ch = std::process::Command::new(c)
+            .arg(&user)
+            .arg("nullok")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        if let Ok(mut child) = ch {
+            if let Some(mut si) = child.stdin.take() {
+                let mut data = pw.clone().into_bytes();
+                data.push(0);
+                let _ = si.write_all(&data);
+            }
+            return match child.wait() {
+                Ok(s) => {
+                    if s.success() { 1 } else { 0 }
+                }
+                Err(_) => -1,
+            };
+        }
+    }
+    -1
+}
+
+fn run_dir() -> String {
+    std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string())
+}
+
+pub fn hw_pid_is(pid: i32, name: &str) -> bool {
+    match std::fs::read(format!("/proc/{}/cmdline", pid)) {
+        Ok(b) => {
+            let mut has_hwde = false;
+            let mut has_name = false;
+            for (i, part) in b.split(|c| *c == 0).enumerate() {
+                if i == 0 && String::from_utf8_lossy(part).contains("hwde") {
+                    has_hwde = true;
+                }
+                if i > 0 && part == name.as_bytes() {
+                    has_name = true;
+                }
+            }
+            has_hwde && has_name
+        }
+        Err(_) => false,
+    }
+}
+
+// replace=1: poprzednia instancja jest zabijana, a ta kontynuuje (zwraca 1)
+// replace=0: poprzednia instancja jest zabijana, a ta konczy prace (zwraca 0) - przelacznik
+// replace=2: gdy poprzednia dziala, ta konczy prace (zwraca 0) bez zabijania
+pub fn hw_single(name: String, replace: i64) -> i64 {
+    let path = format!("{}/hwde-{}.pid", run_dir(), name);
+    let me = std::process::id() as i32;
+    let mut killed = false;
+    if let Ok(t) = std::fs::read_to_string(&path) {
+        if let Ok(pid) = t.trim().parse::<i32>() {
+            if pid != me && hw_pid_is(pid, &name) {
+                if replace == 2 {
+                    return 0;
+                }
+                unsafe {
+                    libc::kill(pid, libc::SIGTERM);
+                }
+                killed = true;
+            }
+        }
+    }
+    if killed && replace == 0 {
+        let _ = std::fs::remove_file(&path);
+        return 0;
+    }
+    let _ = std::fs::write(&path, format!("{}", me));
+    1
+}
+
+pub fn hw_single_done(name: String) -> i64 {
+    let path = format!("{}/hwde-{}.pid", run_dir(), name);
+    if let Ok(t) = std::fs::read_to_string(&path) {
+        if t.trim() == format!("{}", std::process::id()) {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    0
+}
+
+pub fn gui_upper(s: String) -> String {
+    s.to_uppercase()
+}
+
+pub fn hw_sleep_ms(ms: i64) -> i64 {
+    std::thread::sleep(std::time::Duration::from_millis(ms.max(0) as u64));
+    0
+}
+
+// ------------------------------------------------------------ minimalny klient/serwer D-Bus
+struct Rd {
+    b: Vec<u8>,
+    p: usize,
+    le: bool,
+}
+
+impl Rd {
+    fn align(&mut self, n: usize) {
+        while self.p % n != 0 {
+            self.p += 1;
+        }
+    }
+    fn u8(&mut self) -> Option<u8> {
+        let v = *self.b.get(self.p)?;
+        self.p += 1;
+        Some(v)
+    }
+    fn u32(&mut self) -> Option<u32> {
+        self.align(4);
+        if self.p + 4 > self.b.len() {
+            return None;
+        }
+        let mut a = [0u8; 4];
+        a.copy_from_slice(&self.b[self.p..self.p + 4]);
+        self.p += 4;
+        Some(if self.le { u32::from_le_bytes(a) } else { u32::from_be_bytes(a) })
+    }
+    fn i32(&mut self) -> Option<i32> {
+        Some(self.u32()? as i32)
+    }
+    fn str(&mut self) -> Option<String> {
+        let n = self.u32()? as usize;
+        if self.p + n + 1 > self.b.len() {
+            return None;
+        }
+        let s = String::from_utf8_lossy(&self.b[self.p..self.p + n]).to_string();
+        self.p += n + 1;
+        Some(s)
+    }
+    fn sig(&mut self) -> Option<String> {
+        let n = self.u8()? as usize;
+        if self.p + n + 1 > self.b.len() {
+            return None;
+        }
+        let s = String::from_utf8_lossy(&self.b[self.p..self.p + n]).to_string();
+        self.p += n + 1;
+        Some(s)
+    }
+}
+
+fn type_end(sig: &[u8], i: usize) -> usize {
+    if i >= sig.len() {
+        return i;
+    }
+    match sig[i] {
+        b'a' => type_end(sig, i + 1),
+        b'(' => {
+            let mut j = i + 1;
+            while j < sig.len() && sig[j] != b')' {
+                j = type_end(sig, j);
+            }
+            j + 1
+        }
+        b'{' => {
+            let mut j = i + 1;
+            while j < sig.len() && sig[j] != b'}' {
+                j = type_end(sig, j);
+            }
+            j + 1
+        }
+        _ => i + 1,
+    }
+}
+
+fn skip_val(r: &mut Rd, sig: &[u8], i: usize) -> Option<()> {
+    match sig.get(i)? {
+        b'y' => {
+            r.u8()?;
+        }
+        b'b' | b'i' | b'u' => {
+            r.u32()?;
+        }
+        b'n' | b'q' => {
+            r.align(2);
+            r.p += 2;
+        }
+        b'x' | b't' | b'd' => {
+            r.align(8);
+            r.p += 8;
+        }
+        b's' | b'o' => {
+            r.str()?;
+        }
+        b'g' => {
+            r.sig()?;
+        }
+        b'v' => {
+            let s = r.sig()?;
+            skip_val(r, s.as_bytes(), 0)?;
+        }
+        b'a' => {
+            let n = r.u32()? as usize;
+            let el = *sig.get(i + 1)?;
+            let al = match el {
+                b'x' | b't' | b'd' | b'(' | b'{' => 8,
+                b'n' | b'q' => 2,
+                b'y' | b'g' | b'v' => 1,
+                _ => 4,
+            };
+            r.align(al);
+            r.p += n;
+        }
+        b'(' | b'{' => {
+            r.align(8);
+            let mut j = i + 1;
+            while j < sig.len() && sig[j] != b')' && sig[j] != b'}' {
+                skip_val(r, sig, j)?;
+                j = type_end(sig, j);
+            }
+        }
+        _ => return None,
+    }
+    if r.p > r.b.len() {
+        return None;
+    }
+    Some(())
+}
+
+struct Wr {
+    b: Vec<u8>,
+}
+
+impl Wr {
+    fn align(&mut self, n: usize) {
+        while self.b.len() % n != 0 {
+            self.b.push(0);
+        }
+    }
+    fn u32(&mut self, v: u32) {
+        self.align(4);
+        self.b.extend_from_slice(&v.to_le_bytes());
+    }
+    fn str(&mut self, s: &str) {
+        self.u32(s.len() as u32);
+        self.b.extend_from_slice(s.as_bytes());
+        self.b.push(0);
+    }
+    fn sig(&mut self, s: &str) {
+        self.b.push(s.len() as u8);
+        self.b.extend_from_slice(s.as_bytes());
+        self.b.push(0);
+    }
+}
+
+fn field_str(w: &mut Wr, code: u8, sig: &str, val: &str) {
+    w.align(8);
+    w.b.push(code);
+    w.sig(sig);
+    if sig == "g" {
+        w.sig(val);
+    } else {
+        w.str(val);
+    }
+}
+
+// typ: 1 wywolanie, 2 odpowiedz, 3 blad, 4 sygnal
+fn build_msg(typ: u8, flags: u8, serial: u32, reply_to: u32, dest: &str, path: &str, iface: &str, member: &str, err: &str, sig: &str, body: &[u8]) -> Vec<u8> {
+    let mut f = Wr { b: Vec::new() };
+    if !path.is_empty() {
+        field_str(&mut f, 1, "o", path);
+    }
+    if !iface.is_empty() {
+        field_str(&mut f, 2, "s", iface);
+    }
+    if !member.is_empty() {
+        field_str(&mut f, 3, "s", member);
+    }
+    if !err.is_empty() {
+        field_str(&mut f, 4, "s", err);
+    }
+    if reply_to != 0 {
+        f.align(8);
+        f.b.push(5);
+        f.sig("u");
+        f.u32(reply_to);
+    }
+    if !dest.is_empty() {
+        field_str(&mut f, 6, "s", dest);
+    }
+    if !sig.is_empty() {
+        field_str(&mut f, 8, "g", sig);
+    }
+    let mut m: Vec<u8> = Vec::new();
+    m.push(b'l');
+    m.push(typ);
+    m.push(flags);
+    m.push(1);
+    m.extend_from_slice(&(body.len() as u32).to_le_bytes());
+    m.extend_from_slice(&serial.to_le_bytes());
+    m.extend_from_slice(&(f.b.len() as u32).to_le_bytes());
+    m.extend_from_slice(&f.b);
+    while m.len() % 8 != 0 {
+        m.push(0);
+    }
+    m.extend_from_slice(body);
+    m
+}
+
+struct Msg {
+    typ: u8,
+    flags: u8,
+    serial: u32,
+    reply_to: u32,
+    path: String,
+    iface: String,
+    member: String,
+    sender: String,
+    sig: String,
+    body: Vec<u8>,
+    le: bool,
+}
+
+fn read_msg(s: &mut UnixStream) -> Option<Msg> {
+    let mut h = [0u8; 16];
+    s.read_exact(&mut h).ok()?;
+    let le = h[0] == b'l';
+    let rd = |a: &[u8]| -> u32 {
+        let mut x = [0u8; 4];
+        x.copy_from_slice(a);
+        if le { u32::from_le_bytes(x) } else { u32::from_be_bytes(x) }
+    };
+    let blen = rd(&h[4..8]) as usize;
+    let serial = rd(&h[8..12]);
+    let flen = rd(&h[12..16]) as usize;
+    if flen > 1 << 20 || blen > 1 << 24 {
+        return None;
+    }
+    let pad = (8 - (16 + flen) % 8) % 8;
+    let mut rest = vec![0u8; flen + pad + blen];
+    s.read_exact(&mut rest).ok()?;
+    let mut full = h.to_vec();
+    full.extend_from_slice(&rest);
+    let mut r = Rd { b: full, p: 16, le };
+    let end = 16 + flen;
+    let mut m = Msg { typ: h[1], flags: h[2], serial, reply_to: 0, path: String::new(), iface: String::new(), member: String::new(), sender: String::new(), sig: String::new(), body: Vec::new(), le };
+    while r.p < end {
+        r.align(8);
+        if r.p >= end {
+            break;
+        }
+        let code = r.u8()?;
+        let vs = r.sig()?;
+        match (code, vs.as_str()) {
+            (1, _) => m.path = r.str()?,
+            (2, _) => m.iface = r.str()?,
+            (3, _) => m.member = r.str()?,
+            (5, _) => m.reply_to = r.u32()?,
+            (7, _) => m.sender = r.str()?,
+            (8, _) => m.sig = r.sig()?,
+            _ => {
+                skip_val(&mut r, vs.as_bytes(), 0)?;
+            }
+        }
+    }
+    m.body = rest[flen + pad..].to_vec();
+    Some(m)
+}
+
+fn bus_connect() -> Option<UnixStream> {
+    let addr = std::env::var("DBUS_SESSION_BUS_ADDRESS").unwrap_or_default();
+    let mut path = String::new();
+    for part in addr.split(';') {
+        if let Some(rest) = part.strip_prefix("unix:") {
+            for kv in rest.split(',') {
+                if let Some(p) = kv.strip_prefix("path=") {
+                    path = p.to_string();
+                }
+            }
+        }
+        if !path.is_empty() {
+            break;
+        }
+    }
+    if path.is_empty() {
+        path = format!("{}/bus", run_dir());
+    }
+    let mut s = UnixStream::connect(&path).ok()?;
+    let uid = unsafe { libc::getuid() }.to_string();
+    let hex: String = uid.bytes().map(|b| format!("{:02x}", b)).collect();
+    s.write_all(format!("\0AUTH EXTERNAL {}\r\n", hex).as_bytes()).ok()?;
+    let mut line = Vec::new();
+    let mut one = [0u8; 1];
+    loop {
+        s.read_exact(&mut one).ok()?;
+        line.push(one[0]);
+        if line.ends_with(b"\r\n") {
+            break;
+        }
+        if line.len() > 512 {
+            return None;
+        }
+    }
+    if !line.starts_with(b"OK") {
+        return None;
+    }
+    s.write_all(b"BEGIN\r\n").ok()?;
+    Some(s)
+}
+
+static SERIAL: AtomicU32 = AtomicU32::new(1);
+static NEXT_ID: AtomicU32 = AtomicU32::new(1);
+static QUEUE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static WRITER: Mutex<Option<UnixStream>> = Mutex::new(None);
+
+fn next_serial() -> u32 {
+    SERIAL.fetch_add(1, Ordering::SeqCst)
+}
+
+fn call_wait(s: &mut UnixStream, dest: &str, path: &str, iface: &str, member: &str, sig: &str, body: &[u8]) -> Option<Msg> {
+    let ser = next_serial();
+    let m = build_msg(1, 0, ser, 0, dest, path, iface, member, "", sig, body);
+    s.write_all(&m).ok()?;
+    loop {
+        let r = read_msg(s)?;
+        if (r.typ == 2 || r.typ == 3) && r.reply_to == ser {
+            if r.typ == 3 {
+                return None;
+            }
+            return Some(r);
+        }
+    }
+}
+
+fn clean(s: &str) -> String {
+    s.replace('\t', " ").replace('\n', " ").replace('\r', " ")
+}
+
+fn handle_notify(m: &Msg) -> Option<u32> {
+    let mut r = Rd { b: m.body.clone(), p: 0, le: m.le };
+    let app = r.str()?;
+    let replaces = r.u32()?;
+    let icon = r.str()?;
+    let summary = r.str()?;
+    let body = r.str()?;
+    // actions: as
+    let n = r.u32()? as usize;
+    r.p += n;
+    // hints: a{sv}
+    let hn = r.u32()? as usize;
+    r.align(8);
+    let hend = r.p + hn;
+    let mut urgency: u8 = 1;
+    while r.p < hend {
+        r.align(8);
+        if r.p >= hend {
+            break;
+        }
+        let key = r.str()?;
+        let vs = r.sig()?;
+        if key == "urgency" && vs == "y" {
+            urgency = r.u8()?;
+        } else {
+            skip_val(&mut r, vs.as_bytes(), 0)?;
+        }
+    }
+    let timeout = r.i32().unwrap_or(-1);
+    let id = if replaces != 0 { replaces } else { NEXT_ID.fetch_add(1, Ordering::SeqCst) };
+    let line = format!("n\t{}\t{}\t{}\t{}\t{}\t{}\t{}", id, clean(&app), clean(&icon), clean(&summary), clean(&body), urgency, timeout);
+    QUEUE.lock().ok()?.push(line);
+    Some(id)
+}
+
+fn reply(w: &mut UnixStream, to: &Msg, sig: &str, body: &[u8]) {
+    let m = build_msg(2, 1, next_serial(), to.serial, &to.sender, "", "", "", "", sig, body);
+    let _ = w.write_all(&m);
+}
+
+fn server_loop(mut rs: UnixStream, mut ws: UnixStream) {
+    loop {
+        let m = match read_msg(&mut rs) {
+            Some(m) => m,
+            None => return,
+        };
+        if m.typ != 1 || m.iface == "org.freedesktop.DBus" {
+            continue;
+        }
+        let noreply = m.flags & 1 != 0;
+        if m.iface == "org.freedesktop.Notifications" {
+            match m.member.as_str() {
+                "Notify" => {
+                    if let Some(id) = handle_notify(&m) {
+                        if !noreply {
+                            let mut b = Wr { b: Vec::new() };
+                            b.u32(id);
+                            reply(&mut ws, &m, "u", &b.b);
+                        }
+                    } else if !noreply {
+                        let e = build_msg(3, 1, next_serial(), m.serial, &m.sender, "", "", "", "org.freedesktop.DBus.Error.InvalidArgs", "", &[]);
+                        let _ = ws.write_all(&e);
+                    }
+                }
+                "GetCapabilities" => {
+                    let mut inner = Wr { b: Vec::new() };
+                    inner.str("body");
+                    let mut b = Wr { b: Vec::new() };
+                    b.u32(inner.b.len() as u32);
+                    b.b.extend_from_slice(&inner.b);
+                    reply(&mut ws, &m, "as", &b.b);
+                }
+                "GetServerInformation" => {
+                    let mut b = Wr { b: Vec::new() };
+                    b.str("HWDE");
+                    b.str("HackerOS");
+                    b.str("0.1");
+                    b.str("1.2");
+                    reply(&mut ws, &m, "ssss", &b.b);
+                }
+                "CloseNotification" => {
+                    let mut r = Rd { b: m.body.clone(), p: 0, le: m.le };
+                    if let Some(id) = r.u32() {
+                        if let Ok(mut q) = QUEUE.lock() {
+                            q.push(format!("c\t{}", id));
+                        }
+                    }
+                    if !noreply {
+                        reply(&mut ws, &m, "", &[]);
+                    }
+                }
+                _ => {
+                    if !noreply {
+                        let e = build_msg(3, 1, next_serial(), m.serial, &m.sender, "", "", "", "org.freedesktop.DBus.Error.UnknownMethod", "", &[]);
+                        let _ = ws.write_all(&e);
+                    }
+                }
+            }
+        } else if m.iface == "org.freedesktop.DBus.Peer" && !noreply {
+            reply(&mut ws, &m, "", &[]);
+        } else if !noreply {
+            let e = build_msg(3, 1, next_serial(), m.serial, &m.sender, "", "", "", "org.freedesktop.DBus.Error.UnknownMethod", "", &[]);
+            let _ = ws.write_all(&e);
+        }
+    }
+}
+
+// uruchamia watek serwera org.freedesktop.Notifications; 1 = dziala, 0 = nazwa zajeta, -1 = brak szyny
+pub fn hw_notif_start() -> i64 {
+    let mut s = match bus_connect() {
+        Some(s) => s,
+        None => return -1,
+    };
+    if call_wait(&mut s, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "Hello", "", &[]).is_none() {
+        return -1;
+    }
+    let mut b = Wr { b: Vec::new() };
+    b.str("org.freedesktop.Notifications");
+    b.u32(4);
+    let r = match call_wait(&mut s, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "RequestName", "su", &b.b) {
+        Some(r) => r,
+        None => return -1,
+    };
+    let mut rd = Rd { b: r.body.clone(), p: 0, le: r.le };
+    let code = rd.u32().unwrap_or(0);
+    if code != 1 && code != 4 {
+        return 0;
+    }
+    let ws = match s.try_clone() {
+        Ok(w) => w,
+        Err(_) => return -1,
+    };
+    if let Ok(mut g) = WRITER.lock() {
+        *g = ws.try_clone().ok();
+    }
+    std::thread::spawn(move || server_loop(s, ws));
+    1
+}
+
+pub fn hw_notif_poll() -> Vec<String> {
+    match QUEUE.lock() {
+        Ok(mut q) => std::mem::take(&mut *q),
+        Err(_) => Vec::new(),
+    }
+}
+
+// sygnal NotificationClosed(id, powod): 1 wygasl, 2 zamkniety przez uzytkownika, 3 przez CloseNotification
+pub fn hw_notif_closed(id: i64, reason: i64) -> i64 {
+    let mut b = Wr { b: Vec::new() };
+    b.u32(id as u32);
+    b.u32(reason as u32);
+    let m = build_msg(4, 1, next_serial(), 0, "", "/org/freedesktop/Notifications", "org.freedesktop.Notifications", "NotificationClosed", "", "uu", &b.b);
+    if let Ok(mut g) = WRITER.lock() {
+        if let Some(w) = g.as_mut() {
+            let _ = w.write_all(&m);
+        }
+    }
+    0
+}
+
+// klient: wysyla powiadomienie; zwraca id lub -1
+pub fn hw_notify_send(app: String, summary: String, body: String, urgency: i64, timeout: i64) -> i64 {
+    let mut s = match bus_connect() {
+        Some(s) => s,
+        None => return -1,
+    };
+    if call_wait(&mut s, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "Hello", "", &[]).is_none() {
+        return -1;
+    }
+    let mut b = Wr { b: Vec::new() };
+    b.str(&app);
+    b.u32(0);
+    b.str("");
+    b.str(&summary);
+    b.str(&body);
+    b.u32(0);
+    // a{sv} z jednym wpisem urgency
+    b.align(4);
+    let lenpos = b.b.len();
+    b.u32(0);
+    b.align(8);
+    let start = b.b.len();
+    b.str("urgency");
+    b.sig("y");
+    b.b.push(urgency as u8);
+    let n = (b.b.len() - start) as u32;
+    b.b[lenpos..lenpos + 4].copy_from_slice(&n.to_le_bytes());
+    b.u32(timeout as u32);
+    match call_wait(&mut s, "org.freedesktop.Notifications", "/org/freedesktop/Notifications", "org.freedesktop.Notifications", "Notify", "susssasa{sv}i", &b.b) {
+        Some(r) => {
+            let mut rd = Rd { b: r.body.clone(), p: 0, le: r.le };
+            rd.u32().map(|v| v as i64).unwrap_or(0)
+        }
+        None => -1,
+    }
+}
+]
