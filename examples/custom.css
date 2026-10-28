@@ -1,0 +1,14 @@
+/* ~/.config/hwde/custom.css - dodatkowy wyglad powloki i Ustawien (podzbior CSS biblioteki gui).
+   Zmiany widac po zapisaniu pliku - powloka przeladowuje go sama. */
+
+/* bardziej "tabletowe", okragle przyciski */
+button { border-radius: 999px; }
+
+/* gradient na glownych przyciskach */
+button.primary { background: linear-gradient(90deg, #8b5cf6, #3b82f6); color: #ffffff; }
+
+/* wiekszy cien kart i okienek */
+.card { box-shadow: 0 16px 40px rgba(0,0,0,0.45); }
+
+/* panel: przezroczystosc nadpisana CSS-em */
+#hwde-panel { background: rgba(10,10,12,0.82); }
