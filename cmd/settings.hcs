@@ -1,0 +1,660 @@
+get <bit:gui>
+include <sys>
+include <conf>
+include <sysinfo>
+include <labwc>
+
+!! ============================================================================
+!! Ustawienia HWDE - jedyna wbudowana aplikacja. Zmienia hwde.conf; powloka i
+!! sama aplikacja przeladowuja sie na zywo, a labwc dostaje nowe rc.xml/themerc.
+!! ============================================================================
+
+struct SState [
+    c: Conf,
+    th: Theme,
+    page: Int,
+    pending: Int,
+    outputs: List<OutputInfo>,
+    vol: Int,
+    muted: Bool,
+    bright: Int,
+    new_key: Str,
+    new_cmd: Str,
+    new_auto: Str,
+    confirm: Bool,
+    status: Str
+]
+
+fun page_count() -> Int [
+    end 8
+]
+
+fun page_title(c: Conf, i: Int) -> Str [
+    if i == 0 [
+        end tr(c.clone(), "Wygląd", "Appearance")
+    ]
+    if i == 1 [
+        end tr(c.clone(), "Panel", "Panel")
+    ]
+    if i == 2 [
+        end tr(c.clone(), "Okna", "Windows")
+    ]
+    if i == 3 [
+        end tr(c.clone(), "Wejście", "Input")
+    ]
+    if i == 4 [
+        end tr(c.clone(), "Ekran i dźwięk", "Display & sound")
+    ]
+    if i == 5 [
+        end tr(c.clone(), "Powiadomienia i blokada", "Notifications & lock")
+    ]
+    if i == 6 [
+        end tr(c.clone(), "Skróty i aplikacje", "Shortcuts & apps")
+    ]
+    end tr(c.clone(), "System", "System")
+]
+
+fun page_icon(i: Int) -> Str [
+    let ic = ["image", "layout-grid", "maximize", "sliders-horizontal", "monitor", "bell", "terminal", "info"]
+    end ic[iclamp(i, 0, 7)].clone()
+]
+
+!! ---------------------------------------------------------------- wartosci wyliczeniowe
+fun enum_vals(key: Str) -> List<Str> [
+    if key == "appearance.mode" [
+        end ["dark", "light", "auto"]
+    ]
+    if key == "panel.position" [
+        end ["top", "bottom"]
+    ]
+    if key == "panel.clock" [
+        end ["24h", "12h"]
+    ]
+    if key == "wallpaper.mode" [
+        end ["gradient", "color", "image"]
+    ]
+    if key == "windows.titlebar" [
+        end ["icon:iconify,max,close", ":iconify,max,close", "close,iconify,max:", "icon:close"]
+    ]
+    if key == "input.layout" [
+        end ["pl", "us", "gb", "de", "fr", "es", "it", "pt", "br", "cz", "sk", "ua", "ru", "se", "no", "dk", "fi", "hu", "ro", "tr"]
+    ]
+    if key == "input.accel" [
+        end ["adaptive", "flat"]
+    ]
+    if key == "general.language" [
+        end ["auto", "pl", "en"]
+    ]
+    if key == "lock.timeout" or key == "lock.screen_off" [
+        end ["0", "1", "2", "5", "10", "15", "30", "60"]
+    ]
+    if key == "display.scale" [
+        end ["1", "1.25", "1.5", "1.75", "2"]
+    ]
+    end []
+]
+
+fun enum_label(c: Conf, key: Str, v: Str) -> Str [
+    if key == "appearance.mode" [
+        if v == "dark" [
+            end tr(c.clone(), "Ciemny", "Dark")
+        ]
+        if v == "light" [
+            end tr(c.clone(), "Jasny", "Light")
+        ]
+        end tr(c.clone(), "Automatyczny (dzień/noc)", "Automatic (day/night)")
+    ]
+    if key == "panel.position" [
+        if v == "top" [
+            end tr(c.clone(), "Góra", "Top")
+        ]
+        end tr(c.clone(), "Dół", "Bottom")
+    ]
+    if key == "panel.clock" [
+        if v == "24h" [
+            end "24 h"
+        ]
+        end "12 h (AM/PM)"
+    ]
+    if key == "wallpaper.mode" [
+        if v == "gradient" [
+            end tr(c.clone(), "Gradient", "Gradient")
+        ]
+        if v == "color" [
+            end tr(c.clone(), "Jeden kolor", "Solid color")
+        ]
+        end tr(c.clone(), "Obraz (swaybg)", "Image (swaybg)")
+    ]
+    if key == "windows.titlebar" [
+        if v == "icon:iconify,max,close" [
+            end tr(c.clone(), "Klasyczny", "Classic")
+        ]
+        if v == ":iconify,max,close" [
+            end tr(c.clone(), "Bez ikony", "No icon")
+        ]
+        if v == "close,iconify,max:" [
+            end tr(c.clone(), "Przyciski po lewej", "Buttons on the left")
+        ]
+        end tr(c.clone(), "Tylko zamknij", "Close only")
+    ]
+    if key == "input.accel" [
+        if v == "adaptive" [
+            end tr(c.clone(), "Adaptacyjne", "Adaptive")
+        ]
+        end tr(c.clone(), "Płaskie", "Flat")
+    ]
+    if key == "general.language" [
+        if v == "auto" [
+            end tr(c.clone(), "Automatycznie", "Automatic")
+        ]
+        if v == "pl" [
+            end "Polski"
+        ]
+        end "English"
+    ]
+    if key == "lock.timeout" or key == "lock.screen_off" [
+        if v == "0" [
+            end tr(c.clone(), "Wyłączone", "Off")
+        ]
+        end v + " min"
+    ]
+    if key == "display.scale" [
+        end (parse_f(v) * 100.0) as Int as Str + "%"
+    ]
+    end v
+]
+
+fun enum_labels(c: Conf, key: Str) -> List<Str> [
+    let vals = enum_vals(key)
+    let out: List<Str> = []
+    let i = 0
+    while i < vals.len() [
+        out.push(enum_label(c.clone(), key, vals[i].clone()))
+        i = i + 1
+    ]
+    end out
+]
+
+fun enum_index(key: Str, v: Str) -> Int [
+    let vals = enum_vals(key)
+    let i = 0
+    while i < vals.len() [
+        if vals[i] == v [
+            end i
+        ]
+        i = i + 1
+    ]
+    end -1
+]
+
+!! ---------------------------------------------------------------- klocki widoku
+fun group(th: Theme, title: Str, rows: List<Element>) -> Element [
+    let kids: List<Element> = []
+    let i = 0
+    while i < rows.len() [
+        if i > 0 [
+            kids.push(rule())
+        ]
+        kids.push(rows[i].clone())
+        i = i + 1
+    ]
+    let box = container(column(kids).spacing(0.0).fill_width())
+    let card = box.background(th.p.surface).radius(th.radius_lg).border(1.0, th.p.border).fill_width()
+    if title == "" [
+        end card
+    ]
+    end column([ text(title).size(12.0).bold().color(th.p.subtext).padding_4(0.0, 0.0, 0.0, 4.0), card ]).spacing(8.0).fill_width()
+]
+
+fun srow(th: Theme, label: Str, hint: Str, control: Element) -> Element [
+    let kids: List<Element> = [ text(label).size(14.0) ]
+    if hint != "" [
+        kids.push(text(hint).size(12.0).color(th.p.subtext))
+    ]
+    end row([ column(kids).spacing(2.0).fill_width(), control ]).align_y(1).spacing(16.0).padding_xy(16.0, 12.0).fill_width()
+]
+
+fun r_toggle(s: SState, label: Str, hint: Str, key: Str) -> Element [
+    end srow(s.th.clone(), label, hint, toggler("", cget_b(s.c.clone(), key)).on_toggle("b:" + key))
+]
+
+fun r_slider(s: SState, label: Str, hint: Str, key: Str, lo: Float, hi: Float, suffix: Str) -> Element [
+    let v = cget_f(s.c.clone(), key)
+    let sl = slider(lo, hi, fclamp(v, lo, hi)).on_change("s:" + key).width(fixed(190.0))
+    let shown = fmt_float(v, 0)
+    if hi - lo <= 4.0 [
+        shown = fmt_float(v, 2)
+    ]
+    end srow(s.th.clone(), label, hint, row([ sl, text(shown + suffix).size(13.0).width(fixed(52.0)).text_align(2) ]).spacing(10.0).align_y(1))
+]
+
+fun r_text(s: SState, label: Str, hint: Str, key: Str, ph: Str) -> Element [
+    end srow(s.th.clone(), label, hint, text_input(ph, cget(s.c.clone(), key)).id(key).on_input("t:" + key).width(fixed(240.0)))
+]
+
+fun r_pick(s: SState, label: Str, hint: Str, key: Str) -> Element [
+    let cur = cget(s.c.clone(), key)
+    let labels = enum_labels(s.c.clone(), key)
+    let idx = enum_index(key, cur)
+    let shown = cur
+    if idx >= 0 [
+        shown = labels[idx].clone()
+    ]
+    end srow(s.th.clone(), label, hint, pick_list(labels, shown).on_select("p:" + key).width(fixed(240.0)))
+]
+
+fun page_head(s: SState, i: Int) -> Element [
+    end text(page_title(s.c.clone(), i)).size(24.0).bold()
+]
+
+!! ---------------------------------------------------------------- strony
+fun swatch(name: Str, label: Str, cur: Str, dark: Bool) -> Element [
+    let col = parse_color(accent_hex(name.clone(), dark))
+    let ring = 0
+    let bw = 0.0
+    if cur == name [
+        bw = 2.5
+        ring = parse_color("#808080")
+    ]
+    let dot = container(space()).size_px(22.0, 22.0).radius(999.0).background(col).border(bw, ring)
+    end tooltip(button_with(dot).on_press("acc:" + name).class("ghost").padding(5.0).radius(999.0), label)
+]
+
+fun page_appearance(s: SState) -> Element [
+    let c = s.c.clone()
+    let th = s.th.clone()
+    let cur = cget(c.clone(), "appearance.accent")
+    let sw = row([ swatch("neutral", tr(c.clone(), "Neutralny", "Neutral"), cur.clone(), th.dark), swatch("blue", tr(c.clone(), "Niebieski", "Blue"), cur.clone(), th.dark), swatch("teal", tr(c.clone(), "Morski", "Teal"), cur.clone(), th.dark), swatch("green", tr(c.clone(), "Zielony", "Green"), cur.clone(), th.dark), swatch("yellow", tr(c.clone(), "Żółty", "Yellow"), cur.clone(), th.dark), swatch("orange", tr(c.clone(), "Pomarańczowy", "Orange"), cur.clone(), th.dark), swatch("red", tr(c.clone(), "Czerwony", "Red"), cur.clone(), th.dark), swatch("pink", tr(c.clone(), "Różowy", "Pink"), cur.clone(), th.dark), swatch("purple", tr(c.clone(), "Fioletowy", "Purple"), cur.clone(), th.dark) ]).spacing(2.0).align_y(1)
+    let look: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Motyw", "Theme"), tr(c.clone(), "Szaro-czarny ciemny albo biało-jasnoszary jasny", "Gray-black dark or white/light-gray light"), "appearance.mode"), srow(th.clone(), tr(c.clone(), "Kolor akcentu", "Accent color"), tr(c.clone(), "Neutralny = biel/czerń zależnie od motywu", "Neutral = white/black depending on the theme"), sw), r_text(s.clone(), tr(c.clone(), "Własny akcent", "Custom accent"), tr(c.clone(), "np. #ff7a00 (nadpisuje wybór powyżej)", "e.g. #ff7a00 (overrides the choice above)"), "appearance.accent", "neutral"), r_slider(s.clone(), tr(c.clone(), "Zaokrąglenie", "Corner radius"), "", "appearance.radius", 0.0, 24.0, " px"), r_slider(s.clone(), tr(c.clone(), "Skala czcionki", "Font scale"), "", "appearance.font_scale", 80.0, 150.0, "%"), r_toggle(s.clone(), tr(c.clone(), "Animacje", "Animations"), "", "appearance.animations") ]
+    let wall: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Rodzaj tła", "Background type"), "", "wallpaper.mode"), r_text(s.clone(), tr(c.clone(), "Kolor 1", "Color 1"), tr(c.clone(), "puste = zgodnie z motywem, np. #2a2a2f", "empty = follow theme, e.g. #2a2a2f"), "wallpaper.color1", "#2a2a2f"), r_text(s.clone(), tr(c.clone(), "Kolor 2", "Color 2"), tr(c.clone(), "koniec gradientu", "gradient end"), "wallpaper.color2", "#0a0a0b"), r_slider(s.clone(), tr(c.clone(), "Kąt gradientu", "Gradient angle"), "", "wallpaper.angle", 0.0, 360.0, "°"), r_text(s.clone(), tr(c.clone(), "Plik obrazu", "Image file"), tr(c.clone(), "wymaga programu swaybg", "requires swaybg"), "wallpaper.image", "~/Pictures/tapeta.png") ]
+    end column([ page_head(s.clone(), 0), group(th.clone(), tr(c.clone(), "Motyw", "Theme"), look), group(th.clone(), tr(c.clone(), "Tapeta", "Wallpaper"), wall) ]).spacing(20.0).fill_width()
+]
+
+fun page_panel(s: SState) -> Element [
+    let c = s.c.clone()
+    let th = s.th.clone()
+    let a: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Położenie", "Position"), "", "panel.position"), r_toggle(s.clone(), tr(c.clone(), "Pływający panel", "Floating panel"), tr(c.clone(), "Zaokrąglony, z marginesem od krawędzi", "Rounded, with a margin from the edge"), "panel.floating"), r_slider(s.clone(), tr(c.clone(), "Wysokość", "Height"), "", "panel.height", 28.0, 64.0, " px"), r_slider(s.clone(), tr(c.clone(), "Margines", "Margin"), "", "panel.margin", 0.0, 24.0, " px"), r_slider(s.clone(), tr(c.clone(), "Przezroczystość tła", "Background opacity"), "", "appearance.panel_opacity", 40.0, 100.0, "%") ]
+    let b: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Format godziny", "Clock format"), "", "panel.clock"), r_toggle(s.clone(), tr(c.clone(), "Sekundy", "Seconds"), "", "panel.seconds"), r_toggle(s.clone(), tr(c.clone(), "Data obok zegara", "Date next to the clock"), "", "panel.date"), r_slider(s.clone(), tr(c.clone(), "Maks. okien na pasku zadań", "Max. taskbar windows"), "", "panel.max_tasks", 2.0, 16.0, "") ]
+    let m: List<Element> = [ r_text(s.clone(), tr(c.clone(), "Lewa strona", "Left side"), tr(c.clone(), "moduły: launcher, tasks, clock, date, status, power, lock, settings", "modules: launcher, tasks, clock, date, status, power, lock, settings"), "panel.left", "launcher,tasks"), r_text(s.clone(), tr(c.clone(), "Środek", "Center"), "", "panel.center", "clock"), r_text(s.clone(), tr(c.clone(), "Prawa strona", "Right side"), "", "panel.right", "status,power") ]
+    end column([ page_head(s.clone(), 1), group(th.clone(), tr(c.clone(), "Wygląd panelu", "Panel look"), a), group(th.clone(), tr(c.clone(), "Zegar i zadania", "Clock & tasks"), b), group(th.clone(), tr(c.clone(), "Moduły (lista rozdzielana przecinkami)", "Modules (comma separated list)"), m) ]).spacing(20.0).fill_width()
+]
+
+fun page_windows(s: SState) -> Element [
+    let c = s.c.clone()
+    let th = s.th.clone()
+    let a: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Pasek tytułowy", "Title bar"), "", "windows.titlebar"), r_slider(s.clone(), tr(c.clone(), "Zaokrąglenie rogów", "Corner radius"), "", "windows.corner_radius", 0.0, 24.0, " px"), r_slider(s.clone(), tr(c.clone(), "Grubość ramki", "Border width"), "", "windows.border", 0.0, 6.0, " px"), r_toggle(s.clone(), tr(c.clone(), "Cienie okien", "Window shadows"), "", "windows.shadows"), r_slider(s.clone(), tr(c.clone(), "Odstęp między oknami", "Window gap"), "", "windows.gap", 0.0, 32.0, " px") ]
+    let b: List<Element> = [ r_toggle(s.clone(), tr(c.clone(), "Przyciąganie do krawędzi", "Snap to edges"), "", "windows.snap"), r_toggle(s.clone(), tr(c.clone(), "Fokus podąża za myszą", "Focus follows mouse"), "", "windows.focus_follows_mouse"), r_slider(s.clone(), tr(c.clone(), "Liczba pulpitów", "Workspaces"), tr(c.clone(), "Skróty Super+1…4", "Shortcuts Super+1…4"), "windows.workspaces", 1.0, 8.0, "") ]
+    let f: List<Element> = [ r_text(s.clone(), tr(c.clone(), "Czcionka tytułów", "Title font"), "", "windows.font", "sans"), r_slider(s.clone(), tr(c.clone(), "Rozmiar czcionki", "Font size"), "", "windows.font_size", 8.0, 16.0, " pt") ]
+    end column([ page_head(s.clone(), 2), group(th.clone(), tr(c.clone(), "Wygląd okien", "Window look"), a), group(th.clone(), tr(c.clone(), "Zachowanie", "Behavior"), b), group(th.clone(), tr(c.clone(), "Czcionka", "Font"), f) ]).spacing(20.0).fill_width()
+]
+
+fun page_input(s: SState) -> Element [
+    let c = s.c.clone()
+    let th = s.th.clone()
+    let a: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Układ klawiatury", "Keyboard layout"), tr(c.clone(), "Zmiana działa po ponownym zalogowaniu", "Takes effect after logging in again"), "input.layout"), r_text(s.clone(), tr(c.clone(), "Wariant", "Variant"), "", "input.variant", "np. dvorak"), r_text(s.clone(), tr(c.clone(), "Opcje XKB", "XKB options"), "", "input.options", "grp:alt_shift_toggle"), r_slider(s.clone(), tr(c.clone(), "Szybkość powtarzania", "Repeat rate"), "", "input.repeat_rate", 5.0, 60.0, "/s"), r_slider(s.clone(), tr(c.clone(), "Opóźnienie powtarzania", "Repeat delay"), "", "input.repeat_delay", 150.0, 1000.0, " ms"), r_toggle(s.clone(), "NumLock", tr(c.clone(), "Włączony przy starcie", "On at startup"), "input.numlock") ]
+    let b: List<Element> = [ r_toggle(s.clone(), tr(c.clone(), "Stuknięcie = kliknięcie", "Tap to click"), "", "input.tap"), r_toggle(s.clone(), tr(c.clone(), "Naturalne przewijanie", "Natural scrolling"), "", "input.natural_scroll"), r_toggle(s.clone(), tr(c.clone(), "Wyłącz podczas pisania", "Disable while typing"), "", "input.disable_while_typing"), r_slider(s.clone(), tr(c.clone(), "Szybkość wskaźnika", "Pointer speed"), "", "input.pointer_speed", -1.0, 1.0, ""), r_pick(s.clone(), tr(c.clone(), "Przyspieszenie", "Acceleration"), "", "input.accel") ]
+    end column([ page_head(s.clone(), 3), group(th.clone(), tr(c.clone(), "Klawiatura", "Keyboard"), a), group(th.clone(), tr(c.clone(), "Mysz i touchpad", "Mouse & touchpad"), b) ]).spacing(20.0).fill_width()
+]
+
+fun page_display(s: SState) -> Element [
+    let c = s.c.clone()
+    let th = s.th.clone()
+    let kids: List<Element> = [ page_head(s.clone(), 4) ]
+    let mons: List<Element> = []
+    let i = 0
+    while i < s.outputs.len() [
+        let o = s.outputs[i].clone()
+        let key = "display.scale." + o.name
+        let cur = cget(c.clone(), key)
+        if cur == "" [
+            cur = fmt_float(o.scale as Float, 0)
+        ]
+        let labels = enum_labels(c.clone(), "display.scale")
+        let idx = enum_index("display.scale", cur)
+        let shown = labels[1].clone()
+        if idx >= 0 [
+            shown = labels[idx].clone()
+        ]
+        let ctl = pick_list(labels, shown).on_select("ds:" + o.name).width(fixed(140.0))
+        mons.push(srow(th.clone(), o.name.clone(), (o.w as Str) + " × " + (o.h as Str), ctl))
+        i = i + 1
+    ]
+    if mons.len() == 0 [
+        mons.push(srow(th.clone(), tr(c.clone(), "Brak danych o monitorach", "No monitor data"), "", text("")))
+    ]
+    if hw_which("wlr-randr") [
+        kids.push(group(th.clone(), tr(c.clone(), "Monitory (skala przez wlr-randr)", "Monitors (scale via wlr-randr)"), mons))
+    ] else [
+        kids.push(group(th.clone(), tr(c.clone(), "Monitory", "Monitors"), [ srow(th.clone(), tr(c.clone(), "Zainstaluj wlr-randr, aby zmieniać skalę", "Install wlr-randr to change the scale"), "", text("")) ]))
+    ]
+    let snd: List<Element> = []
+    if s.vol >= 0 [
+        let sl = slider(0.0, 100.0, fclamp(s.vol as Float, 0.0, 100.0)).on_change("vol").width(fixed(190.0))
+        snd.push(srow(th.clone(), tr(c.clone(), "Głośność", "Volume"), "", row([ sl, text((s.vol as Str) + "%").size(13.0).width(fixed(52.0)).text_align(2) ]).spacing(10.0).align_y(1)))
+        snd.push(srow(th.clone(), tr(c.clone(), "Wycisz", "Mute"), "", toggler("", s.muted).on_toggle("mute")))
+    ]
+    if s.bright >= 0 [
+        let sl2 = slider(1.0, 100.0, fclamp(s.bright as Float, 1.0, 100.0)).on_change("bright").width(fixed(190.0))
+        snd.push(srow(th.clone(), tr(c.clone(), "Jasność", "Brightness"), "", row([ sl2, text((s.bright as Str) + "%").size(13.0).width(fixed(52.0)).text_align(2) ]).spacing(10.0).align_y(1)))
+    ]
+    if snd.len() == 0 [
+        snd.push(srow(th.clone(), tr(c.clone(), "Nie wykryto sterowania dźwiękiem ani jasnością", "No audio or brightness control detected"), tr(c.clone(), "Potrzebne: wpctl/pactl, brightnessctl", "Needs: wpctl/pactl, brightnessctl"), text("")))
+    ]
+    kids.push(group(th.clone(), tr(c.clone(), "Dźwięk i jasność", "Sound & brightness"), snd))
+    end column(kids).spacing(20.0).fill_width()
+]
+
+fun page_notify(s: SState) -> Element [
+    let c = s.c.clone()
+    let th = s.th.clone()
+    let a: List<Element> = [ r_toggle(s.clone(), tr(c.clone(), "Powiadomienia", "Notifications"), tr(c.clone(), "Wbudowany demon org.freedesktop.Notifications", "Built-in org.freedesktop.Notifications daemon"), "notify.enabled"), r_toggle(s.clone(), tr(c.clone(), "Nie przeszkadzać", "Do not disturb"), "", "notify.dnd"), r_slider(s.clone(), tr(c.clone(), "Czas wyświetlania", "Display time"), "", "notify.timeout", 2.0, 20.0, " s"), r_slider(s.clone(), tr(c.clone(), "Maks. jednocześnie", "Max. at once"), "", "notify.max", 1.0, 8.0, "") ]
+    let b: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Zablokuj po bezczynności", "Lock after idle"), tr(c.clone(), "Zmiana działa po restarcie powłoki", "Applies after the shell restarts"), "lock.timeout"), r_pick(s.clone(), tr(c.clone(), "Wyłącz ekran po bezczynności", "Turn screen off after idle"), tr(c.clone(), "Wymaga programu wlopm", "Requires wlopm"), "lock.screen_off") ]
+    end column([ page_head(s.clone(), 5), group(th.clone(), tr(c.clone(), "Powiadomienia", "Notifications"), a), group(th.clone(), tr(c.clone(), "Blokada ekranu", "Screen lock"), b) ]).spacing(20.0).fill_width()
+]
+
+fun list_keys(c: Conf, prefix: Str) -> List<Str> [
+    let keys = c.kv.keys()
+    let names: List<Str> = []
+    let i = 0
+    while i < keys.len() [
+        if s_starts(keys[i].clone(), prefix.clone()) [
+            names.push(keys[i].clone())
+        ]
+        i = i + 1
+    ]
+    end sort_strs(names)
+]
+
+fun page_apps(s: SState) -> Element [
+    let c = s.c.clone()
+    let th = s.th.clone()
+    let apps: List<Element> = [ r_text(s.clone(), tr(c.clone(), "Terminal", "Terminal"), tr(c.clone(), "puste = wykryj automatycznie: ", "empty = autodetect: ") + role_command(conf_default(), "terminal"), "apps.terminal", role_command(conf_default(), "terminal")), r_text(s.clone(), tr(c.clone(), "Przeglądarka", "Browser"), "", "apps.browser", role_command(conf_default(), "browser")), r_text(s.clone(), tr(c.clone(), "Menedżer plików", "File manager"), "", "apps.files", role_command(conf_default(), "files")), r_text(s.clone(), tr(c.clone(), "Edytor", "Editor"), "", "apps.editor", role_command(conf_default(), "editor")) ]
+    let rows: List<Element> = []
+    let ks = list_keys(c.clone(), "keys.")
+    let i = 0
+    while i < ks.len() [
+        let v = cget(c.clone(), ks[i].clone())
+        if v != "" [
+            let del = button("").with_icon("trash").on_press("kdel:" + ks[i]).class("ghost icon")
+            let line = row([ text(key_of(ks[i].clone())).size(13.0).bold().width(fixed(190.0)), text_input("exec:… / action:…", v).id(ks[i].clone()).on_input("t:" + ks[i]).fill_width(), del ]).spacing(10.0).align_y(1).padding_xy(16.0, 6.0).fill_width()
+            rows.push(line)
+        ]
+        i = i + 1
+    ]
+    let add = row([ text_input(tr(c.clone(), "Skrót, np. W-t", "Shortcut, e.g. W-t"), s.new_key.clone()).id("new_key").on_input("nk").width(fixed(190.0)), text_input(tr(c.clone(), "exec:polecenie lub action:Nazwa", "exec:command or action:Name"), s.new_cmd.clone()).id("new_cmd").on_input("nc").on_submit("kadd").fill_width(), button(tr(c.clone(), "Dodaj", "Add")).with_icon("plus").on_press("kadd").class("primary") ]).spacing(10.0).align_y(1).padding_xy(16.0, 10.0).fill_width()
+    rows.push(add)
+    let auto: List<Element> = []
+    let autos = list_keys(c.clone(), "autostart.")
+    let k = 0
+    while k < autos.len() [
+        let del2 = button("").with_icon("trash").on_press("adel:" + autos[k]).class("ghost icon")
+        auto.push(row([ text_input("", cget(c.clone(), autos[k].clone())).id(autos[k].clone()).on_input("t:" + autos[k]).fill_width(), del2 ]).spacing(10.0).align_y(1).padding_xy(16.0, 6.0).fill_width())
+        k = k + 1
+    ]
+    auto.push(row([ text_input(tr(c.clone(), "Polecenie uruchamiane przy logowaniu", "Command to run at login"), s.new_auto.clone()).id("new_auto").on_input("na").on_submit("aadd").fill_width(), button(tr(c.clone(), "Dodaj", "Add")).with_icon("plus").on_press("aadd").class("primary") ]).spacing(10.0).align_y(1).padding_xy(16.0, 10.0).fill_width())
+    end column([ page_head(s.clone(), 6), group(th.clone(), tr(c.clone(), "Aplikacje domyślne", "Default apps"), apps), group(th.clone(), tr(c.clone(), "Skróty klawiszowe (W = Super, A = Alt, C = Ctrl, S = Shift)", "Keyboard shortcuts (W = Super, A = Alt, C = Ctrl, S = Shift)"), rows), group(th.clone(), tr(c.clone(), "Autostart", "Autostart"), auto) ]).spacing(20.0).fill_width()
+]
+
+fun page_system(s: SState) -> Element [
+    let c = s.c.clone()
+    let th = s.th.clone()
+    let kern = out_of("uname", ["-sr"])
+    let lw = "labwc"
+    if hw_which("labwc") [
+        lw = out_of("labwc", ["--version"])
+    ]
+    let a: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Język", "Language"), "", "general.language") ]
+    let reset_label = tr(c.clone(), "Przywróć domyślne", "Reset to defaults")
+    if s.confirm [
+        reset_label = tr(c.clone(), "Na pewno? Kliknij ponownie", "Sure? Click again")
+    ]
+    let acts = row([ button(tr(c.clone(), "Edytuj hwde.conf", "Edit hwde.conf")).with_icon("pencil").on_press("edit_conf"), button(tr(c.clone(), "Edytuj custom.css", "Edit custom.css")).with_icon("pencil").on_press("edit_css"), button(tr(c.clone(), "Przeładuj labwc", "Reload labwc")).with_icon("refresh-cw").on_press("reload"), button(reset_label).with_icon("trash").class("danger").on_press("reset") ]).spacing(10.0)
+    let b: List<Element> = [ srow(th.clone(), "HWDE", tr(c.clone(), "HackerOS Wayland Desktop Environment", "HackerOS Wayland Desktop Environment"), text("0.1").bold()), srow(th.clone(), tr(c.clone(), "Kompozytor", "Compositor"), "", text(lw.clone()).size(13.0)), srow(th.clone(), tr(c.clone(), "Jądro", "Kernel"), "", text(kern.clone()).size(13.0)), srow(th.clone(), tr(c.clone(), "Konfiguracja", "Configuration"), conf_path(), text("")) ]
+    end column([ page_head(s.clone(), 7), group(th.clone(), tr(c.clone(), "Ogólne", "General"), a), group(th.clone(), tr(c.clone(), "O systemie", "About"), b), acts, text(s.status.clone()).size(12.0).color(th.p.subtext) ]).spacing(20.0).fill_width()
+]
+
+fun settings_view(s: SState) -> Element [
+    let th = s.th.clone()
+    let items: List<Element> = [ text("HWDE").size(13.0).bold().color(th.p.subtext).padding_4(10.0, 0.0, 8.0, 12.0) ]
+    let i = 0
+    while i < page_count() [
+        let line = row([ icon(page_icon(i)).size(17.0), text(page_title(s.c.clone(), i)).size(14.0) ]).spacing(12.0).align_y(1)
+        let b = button_with(line).on_press("page:" + (i as Str)).class("ghost").fill_width().padding_xy(12.0, 9.0)
+        b.st.ax = 0
+        if i == s.page [
+            b = b.background(with_alpha(th.p.text, 24))
+        ]
+        items.push(b)
+        i = i + 1
+    ]
+    let side = container(column(items).spacing(2.0).fill_width()).width(fixed(240.0)).fill_height().padding(10.0).background(th.p.surface)
+    let page = page_system(s.clone())
+    if s.page == 0 [
+        page = page_appearance(s.clone())
+    ]
+    if s.page == 1 [
+        page = page_panel(s.clone())
+    ]
+    if s.page == 2 [
+        page = page_windows(s.clone())
+    ]
+    if s.page == 3 [
+        page = page_input(s.clone())
+    ]
+    if s.page == 4 [
+        page = page_display(s.clone())
+    ]
+    if s.page == 5 [
+        page = page_notify(s.clone())
+    ]
+    if s.page == 6 [
+        page = page_apps(s.clone())
+    ]
+    let body = scrollable(container(page).padding(28.0).fill_width()).fill_all()
+    end row([ side, body ]).fill_all()
+]
+
+!! ---------------------------------------------------------------- aktualizacja
+fun conf_without(c: Conf, key: Str) -> Conf [
+    let keep: Dict<Str, Str> = dict()
+    let all = c.kv.keys()
+    let q = 0
+    while q < all.len() [
+        if all[q] != key [
+            keep.insert(all[q].clone(), cget(c.clone(), all[q].clone()))
+        ]
+        q = q + 1
+    ]
+    end Conf(keep, c.lang.clone(), c.path.clone())
+]
+
+fun next_auto_key(c: Conf) -> Str [
+    let n = list_keys(c.clone(), "autostart.").len() + 1
+    let name = "autostart.a" + pad3(n)
+    while cget(c.clone(), name.clone()) != "" [
+        n = n + 1
+        name = "autostart.a" + pad3(n)
+    ]
+    end name
+]
+
+fun pad3(n: Int) -> Str [
+    if n < 10 [
+        end "00" + (n as Str)
+    ]
+    if n < 100 [
+        end "0" + (n as Str)
+    ]
+    end n as Str
+]
+
+fun settings_update(s: SState, m: Message, now: Int) -> SState [
+    let n = s.clone()
+    n.outputs = outputs_update(n.outputs.clone(), m)
+    let changed = false
+    let id = m.id.clone()
+    if s_starts(id.clone(), "page:") [
+        n.page = parse_i(s_sub(id.clone(), 5, slen(id.clone())))
+        n.confirm = false
+    ]
+    if s_starts(id.clone(), "b:") [
+        cset_b(n.c, s_sub(id.clone(), 2, slen(id.clone())), m.flag)
+        changed = true
+    ]
+    if s_starts(id.clone(), "s:") [
+        let key = s_sub(id.clone(), 2, slen(id.clone()))
+        let v = m.num
+        if key == "input.pointer_speed" [
+            cset(n.c, key, fmt_float(fround(v * 10.0) / 10.0, 1))
+        ] else [
+            cset(n.c, key, (fround(v) as Int) as Str)
+        ]
+        changed = true
+    ]
+    if s_starts(id.clone(), "t:") [
+        cset(n.c, s_sub(id.clone(), 2, slen(id.clone())), m.text.clone())
+        changed = true
+    ]
+    if s_starts(id.clone(), "p:") [
+        let key2 = s_sub(id.clone(), 2, slen(id.clone()))
+        let vals = enum_vals(key2.clone())
+        if m.idx >= 0 and m.idx < vals.len() [
+            cset(n.c, key2.clone(), vals[m.idx].clone())
+            changed = true
+            if key2 == "general.language" [
+                n.c.lang = resolve_lang(n.c.clone())
+            ]
+        ]
+    ]
+    if s_starts(id.clone(), "acc:") [
+        cset(n.c, "appearance.accent", s_sub(id.clone(), 4, slen(id.clone())))
+        changed = true
+    ]
+    if s_starts(id.clone(), "ds:") [
+        let out = s_sub(id.clone(), 3, slen(id.clone()))
+        let vals2 = enum_vals("display.scale")
+        if m.idx >= 0 and m.idx < vals2.len() [
+            cset(n.c, "display.scale." + out, vals2[m.idx].clone())
+            if hw_which("wlr-randr") [
+                hw_status("wlr-randr", ["--output", out, "--scale", vals2[m.idx].clone()])
+            ]
+            changed = true
+        ]
+    ]
+    if id == "vol" [
+        n.vol = fround(m.num) as Int
+        vol_set(n.vol)
+    ]
+    if id == "bright" [
+        n.bright = fround(m.num) as Int
+        bright_set(n.bright)
+    ]
+    if id == "mute" [
+        vol_toggle_mute()
+        n.muted = vol_muted()
+    ]
+    if id == "nk" [
+        n.new_key = m.text.clone()
+    ]
+    if id == "nc" [
+        n.new_cmd = m.text.clone()
+    ]
+    if id == "na" [
+        n.new_auto = m.text.clone()
+    ]
+    if id == "kadd" [
+        if trim(n.new_key.clone()) != "" and trim(n.new_cmd.clone()) != "" [
+            cset(n.c, "keys." + trim(n.new_key.clone()), trim(n.new_cmd.clone()))
+            n.new_key = ""
+            n.new_cmd = ""
+            changed = true
+        ]
+    ]
+    if s_starts(id.clone(), "kdel:") [
+        cset(n.c, s_sub(id.clone(), 5, slen(id.clone())), "")
+        changed = true
+    ]
+    if id == "aadd" [
+        if trim(n.new_auto.clone()) != "" [
+            let akey = next_auto_key(n.c.clone())
+            cset(n.c, akey, trim(n.new_auto.clone()))
+            n.new_auto = ""
+            changed = true
+        ]
+    ]
+    if s_starts(id.clone(), "adel:") [
+        let kk = s_sub(id.clone(), 5, slen(id.clone()))
+        n.c = conf_without(n.c.clone(), kk)
+        changed = true
+    ]
+    if id == "edit_conf" [
+        conf_save(n.c.clone())
+        sh(role_command(n.c.clone(), "editor") + " '" + conf_path() + "'")
+    ]
+    if id == "edit_css" [
+        if gui_file_size(css_path()) < 0 [
+            gui_write_file(css_path(), "/* HWDE: wlasny CSS. Przyklad:\nbutton.primary { border-radius: 999px; }\n*/\n")
+        ]
+        sh(role_command(n.c.clone(), "editor") + " '" + css_path() + "'")
+    ]
+    if id == "reload" [
+        labwc_apply(n.c.clone(), true)
+        n.status = tr(n.c.clone(), "Przeładowano labwc.", "labwc reloaded.")
+    ]
+    if id == "reset" [
+        if n.confirm [
+            let fresh = conf_default()
+            fresh.lang = resolve_lang(fresh.clone())
+            n.c = fresh
+            n.confirm = false
+            changed = true
+            n.status = tr(n.c.clone(), "Przywrócono ustawienia domyślne.", "Defaults restored.")
+        ] else [
+            n.confirm = true
+        ]
+    ]
+    if changed [
+        conf_save(n.c.clone())
+        n.th = hw_theme(n.c.clone())
+        n.pending = now
+    ]
+    end n
+]
+
+fun run_settings() [
+    if hw_single("settings", 2) == 0 [
+        end
+    ]
+    let c = conf_load()
+    let th = hw_theme(c.clone())
+    let app = app_new(tr(c.clone(), "Ustawienia", "Settings"), 920, 640)
+    if app.backend == "headless" and gui_env("GUI_BACKEND") != "headless" [
+        log("brak sesji graficznej")
+        end
+    ]
+    app.set_theme(th.clone())
+    app.set_css(hw_css(c.clone(), th.clone()))
+    app.set_tick(250)
+    let outs: List<OutputInfo> = []
+    let s = SState(c, th, 0, -1, outs, vol_get(), vol_muted(), bright_get(), "", "", "", false, "")
+    while app.running() [
+        let old_theme = s.th.name.clone()
+        let old_key = cget(s.c.clone(), "appearance.accent") + cget(s.c.clone(), "appearance.radius") + cget(s.c.clone(), "appearance.font_scale") + cget(s.c.clone(), "appearance.animations")
+        for m in app.frame1(settings_view(s.clone())) [
+            s = settings_update(s.clone(), m, gui_now_ms())
+        ]
+        let new_key = cget(s.c.clone(), "appearance.accent") + cget(s.c.clone(), "appearance.radius") + cget(s.c.clone(), "appearance.font_scale") + cget(s.c.clone(), "appearance.animations")
+        if s.th.name != old_theme or new_key != old_key [
+            app.set_theme(s.th.clone())
+            app.set_css(hw_css(s.c.clone(), s.th.clone()))
+        ]
+        if s.pending >= 0 and gui_now_ms() - s.pending > 600 [
+            labwc_apply(s.c.clone(), true)
+            s.pending = -1
+        ]
+    ]
+    if s.pending >= 0 [
+        labwc_apply(s.c.clone(), true)
+    ]
+    hw_single_done("settings")
+]
