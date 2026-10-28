@@ -1,0 +1,584 @@
+get <bit:gui>
+include <sys>
+include <conf>
+include <sysinfo>
+
+!! ============================================================================
+!! hwde shell - panel, tapeta, powiadomienia (demon org.freedesktop.Notifications),
+!! bezczynnosc (blokada ekranu). Okienka pomocnicze (launcher, szybkie ustawienia,
+!! kalendarz, menu zasilania, OSD) to osobne, krotkie procesy: patrz popups.hcs.
+!! ============================================================================
+
+struct Notif [
+    id: Int,
+    app: Str,
+    title: Str,
+    body: Str,
+    urg: Int,
+    born: Int,
+    life: Int
+]
+
+struct Shell [
+    c: Conf,
+    th: Theme,
+    tasks: List<TopLevel>,
+    outputs: List<OutputInfo>,
+    clock: Clock,
+    vol: Int,
+    muted: Bool,
+    net: Net,
+    bat: Int,
+    charging: Bool,
+    notifs: List<Notif>,
+    stamp: Int,
+    ticks: Int,
+    idle_lock: Bool
+]
+
+struct Win [
+    id: Int,
+    kind: Str,
+    out: Str
+]
+
+fun shell_new() -> Shell [
+    let c = conf_load()
+    let th = hw_theme(c.clone())
+    let t: List<TopLevel> = []
+    let o: List<OutputInfo> = []
+    let n: List<Notif> = []
+    end Shell(c, th, t, o, clock_now(), vol_get(), vol_muted(), net_get(), battery_pct(), battery_charging_now(), n, conf_mtime_sum(), 0, false)
+]
+
+!! ---------------------------------------------------------------- moduly panelu
+fun mod_launcher(s: Shell) -> Element [
+    let b = button("").with_icon("layout-grid").on_press("launcher").class("ghost icon")
+    end tooltip(b, tr(s.c.clone(), "Aplikacje", "Applications"))
+]
+
+fun mod_tasks(s: Shell) -> Element [
+    let kids: List<Element> = []
+    let maxn = cget_i(s.c.clone(), "panel.max_tasks")
+    let i = 0
+    while i < s.tasks.len() and i < maxn [
+        let t = s.tasks[i].clone()
+        let label = t.title.clone()
+        if label == "" [
+            label = t.app_id.clone()
+        ]
+        let b = button(short_title(label, 20)).on_press("tl:" + (t.handle as Str)).class("ghost")
+        b = b.padding_xy(12.0, 6.0).size(13.0)
+        if tl_has(t.clone(), "activated") [
+            b = b.background(with_alpha(s.th.p.text, 28)).color(s.th.p.text)
+        ] else [
+            b = b.color(s.th.p.subtext)
+        ]
+        kids.push(b)
+        i = i + 1
+    ]
+    end row(kids).spacing(2.0).align_y(1)
+]
+
+fun mod_clock(s: Shell) -> Element [
+    let parts: List<Element> = [ text(clock_text(s.c.clone(), s.clock.clone())).bold().size(14.0) ]
+    if cget_b(s.c.clone(), "panel.date") [
+        parts.push(text(date_text(s.c.clone(), s.clock.clone())).size(13.0).color(s.th.p.subtext))
+    ]
+    let r = row(parts).spacing(10.0).align_y(1)
+    end button_with(r).on_press("calendar").class("ghost").padding_xy(12.0, 6.0)
+]
+
+fun mod_date(s: Shell) -> Element [
+    end text(date_text(s.c.clone(), s.clock.clone())).size(13.0).color(s.th.p.subtext)
+]
+
+fun mod_status(s: Shell) -> Element [
+    let items: List<Element> = []
+    items.push(icon(net_icon(s.net.clone())).size(17.0))
+    if has_audio() [
+        items.push(icon(vol_icon(s.vol, s.muted)).size(17.0))
+    ]
+    if s.bat >= 0 [
+        items.push(icon(battery_icon(s.charging)).size(17.0))
+        let bt = text((s.bat as Str) + "%").size(13.0)
+        if s.bat <= 15 and not s.charging [
+            bt = bt.color(s.th.p.danger)
+        ]
+        items.push(bt)
+    ]
+    end button_with(row(items).spacing(10.0).align_y(1)).on_press("quick").class("ghost").padding_xy(12.0, 6.0)
+]
+
+fun mod_power(s: Shell) -> Element [
+    end tooltip(button("").with_icon("power").on_press("power").class("ghost icon"), tr(s.c.clone(), "Zasilanie", "Power"))
+]
+
+fun mod_lock(s: Shell) -> Element [
+    end tooltip(button("").with_icon("lock").on_press("lock").class("ghost icon"), tr(s.c.clone(), "Zablokuj", "Lock"))
+]
+
+fun mod_settings(s: Shell) -> Element [
+    end tooltip(button("").with_icon("settings").on_press("settings").class("ghost icon"), tr(s.c.clone(), "Ustawienia", "Settings"))
+]
+
+fun mod_by_name(s: Shell, name: Str) -> Element [
+    if name == "launcher" [
+        end mod_launcher(s.clone())
+    ]
+    if name == "tasks" [
+        end mod_tasks(s.clone())
+    ]
+    if name == "clock" [
+        end mod_clock(s.clone())
+    ]
+    if name == "date" [
+        end mod_date(s.clone())
+    ]
+    if name == "status" [
+        end mod_status(s.clone())
+    ]
+    if name == "power" [
+        end mod_power(s.clone())
+    ]
+    if name == "lock" [
+        end mod_lock(s.clone())
+    ]
+    if name == "settings" [
+        end mod_settings(s.clone())
+    ]
+    end space().width(fixed(0.0))
+]
+
+fun mod_group(s: Shell, key: Str) -> Element [
+    let names = s_split(cget(s.c.clone(), key), ",")
+    let kids: List<Element> = []
+    let i = 0
+    while i < names.len() [
+        let n = trim(names[i].clone())
+        if n != "" [
+            kids.push(mod_by_name(s.clone(), n))
+        ]
+        i = i + 1
+    ]
+    end row(kids).spacing(4.0).align_y(1)
+]
+
+fun bar_view(s: Shell) -> Element [
+    let layout = bar_layout(mod_group(s.clone(), "panel.left"), mod_group(s.clone(), "panel.center"), mod_group(s.clone(), "panel.right"))
+    let e = container(layout)
+    e.id = "hwde-panel"
+    end e.background(panel_bg(s.c.clone(), s.th.clone())).padding(0.0).radius(panel_radius(s.c.clone(), s.th.clone())).border(1.0, s.th.p.border).fill_all()
+]
+
+fun panel_radius(c: Conf, th: Theme) -> Float [
+    if cget_b(c.clone(), "panel.floating") [
+        end th.radius + 4.0
+    ]
+    end 0.0
+]
+
+fun panel_h(c: Conf) -> Int [
+    end iclamp(cget_i(c.clone(), "panel.height"), 28, 80)
+]
+
+fun panel_m(c: Conf) -> Int [
+    if cget_b(c.clone(), "panel.floating") [
+        end iclamp(cget_i(c.clone(), "panel.margin"), 0, 40)
+    ]
+    end 0
+]
+
+fun panel_opts(c: Conf, out: Str) -> Str [
+    let edge = "top"
+    if cget(c.clone(), "panel.position") == "bottom" [
+        edge = "bottom"
+    ]
+    let m = panel_m(c.clone())
+    let h = panel_h(c.clone())
+    let margin = (m as Str) + "," + (m as Str) + ",0," + (m as Str)
+    if edge == "bottom" [
+        margin = "0," + (m as Str) + "," + (m as Str) + "," + (m as Str)
+    ]
+    let o = layer_opts("top", edge + ",left,right", h + m * 2, margin, "none", "hwde-panel") + ";fill_w=1"
+    if out != "" [
+        o = o + ";output=" + out
+    ]
+    end o
+]
+
+!! ---------------------------------------------------------------- tapeta
+fun wall_colors(c: Conf, th: Theme) -> List<Int> [
+    let a = cget(c.clone(), "wallpaper.color1")
+    let b = cget(c.clone(), "wallpaper.color2")
+    let out: List<Int> = []
+    if a == "" [
+        if th.dark [
+            a = "#2a2a2f"
+        ] else [
+            a = "#f4f4f6"
+        ]
+    ]
+    if b == "" [
+        if th.dark [
+            b = "#0a0a0b"
+        ] else [
+            b = "#cfcfd6"
+        ]
+    ]
+    out.push(parse_color(a))
+    out.push(parse_color(b))
+    end out
+]
+
+fun wall_view(c: Conf, th: Theme) -> Element [
+    let cols = wall_colors(c.clone(), th.clone())
+    let e = container(space().fill_all()).fill_all()
+    if cget(c.clone(), "wallpaper.mode") == "color" [
+        end e.background(cols[0])
+    ]
+    end e.gradient(cols[0], cols[1], cget_f(c.clone(), "wallpaper.angle"))
+]
+
+fun wall_is_image(c: Conf) -> Bool [
+    end cget(c.clone(), "wallpaper.mode") == "image" and cget(c.clone(), "wallpaper.image") != "" and hw_which("swaybg") and path_exists(cget(c.clone(), "wallpaper.image"))
+]
+
+fun wall_apply_image(c: Conf) [
+    hw_status("pkill", ["-x", "swaybg"])
+    if wall_is_image(c.clone()) [
+        let col = cget(c.clone(), "wallpaper.color1")
+        if col == "" [
+            col = "#000000"
+        ]
+        gui_spawn("swaybg", ["-i", cget(c.clone(), "wallpaper.image"), "-m", "fill", "-c", col])
+    ]
+]
+
+!! ---------------------------------------------------------------- powiadomienia
+fun toast_card(n: Notif, th: Theme, c: Conf) -> Element [
+    let ic = "bell"
+    let head = row([ icon(ic).size(16.0).color(th.p.subtext), text(short_title(n.app.clone(), 26)).size(12.0).color(th.p.muted), space().fill_width(), icon("x").size(14.0).color(th.p.muted) ]).spacing(8.0).align_y(1).fill_width()
+    let kids: List<Element> = [ head ]
+    let ttl = text(n.title.clone()).bold().size(14.0).fill_width()
+    if n.urg >= 2 [
+        ttl = ttl.color(th.p.danger)
+    ]
+    kids.push(ttl)
+    if n.body != "" [
+        kids.push(text(short_title(n.body.clone(), 160)).size(13.0).color(th.p.subtext).fill_width())
+    ]
+    let box = column(kids).spacing(5.0).fill_width()
+    let card = container(box)
+    card.class = "card"
+    let card2 = card.padding(14.0).radius(th.radius + 2.0).background(th.p.surface).border(1.0, th.p.border).shadow(24.0, 8.0, th.p.shadow).width(fixed(360.0))
+    end button_with(card2).on_press("nd:" + (n.id as Str)).class("ghost").padding(0.0)
+]
+
+fun toasts_view(s: Shell) -> Element [
+    let kids: List<Element> = []
+    let i = 0
+    while i < s.notifs.len() [
+        kids.push(toast_card(s.notifs[i].clone(), s.th.clone(), s.c.clone()))
+        i = i + 1
+    ]
+    end column(kids).spacing(10.0).padding(12.0)
+]
+
+fun toast_h(n: Int) -> Int [
+    end n * 118 + 24
+]
+
+fun toasts_update(s: Shell, now: Int) -> Shell [
+    let n = s.clone()
+    let lines = hw_notif_poll()
+    let i = 0
+    while i < lines.len() [
+        let p = s_split(lines[i].clone(), "\t")
+        if p[0] == "n" and p.len() >= 8 [
+            if cget_b(n.c.clone(), "notify.enabled") and not cget_b(n.c.clone(), "notify.dnd") [
+                let id = parse_i(p[1].clone())
+                let life = cget_i(n.c.clone(), "notify.timeout") * 1000
+                let tmo = parse_i(p[7].clone())
+                if tmo > 0 [
+                    life = tmo
+                ]
+                let urg = parse_i(p[6].clone())
+                if urg >= 2 [
+                    life = 0
+                ]
+                let ttl = p[4].clone()
+                if ttl == "" [
+                    ttl = p[2].clone()
+                ]
+                let item = Notif(id, p[2].clone(), ttl, p[5].clone(), urg, now, life)
+                let out: List<Notif> = []
+                let found = false
+                let k = 0
+                while k < n.notifs.len() [
+                    if n.notifs[k].id == id [
+                        out.push(item.clone())
+                        found = true
+                    ] else [
+                        out.push(n.notifs[k].clone())
+                    ]
+                    k = k + 1
+                ]
+                if not found [
+                    out.push(item)
+                ]
+                let maxn = iclamp(cget_i(n.c.clone(), "notify.max"), 1, 8)
+                while out.len() > maxn [
+                    let rest: List<Notif> = []
+                    let r = 1
+                    while r < out.len() [
+                        rest.push(out[r].clone())
+                        r = r + 1
+                    ]
+                    out = rest
+                ]
+                n.notifs = out
+            ]
+        ]
+        if p[0] == "c" and p.len() >= 2 [
+            n = notif_remove(n.clone(), parse_i(p[1].clone()), 3)
+        ]
+        i = i + 1
+    ]
+    !! wygasanie
+    let keep: List<Notif> = []
+    let j = 0
+    while j < n.notifs.len() [
+        let it = n.notifs[j].clone()
+        if it.life > 0 and now - it.born >= it.life [
+            hw_notif_closed(it.id, 1)
+        ] else [
+            keep.push(it)
+        ]
+        j = j + 1
+    ]
+    n.notifs = keep
+    end n
+]
+
+fun notif_remove(s: Shell, id: Int, reason: Int) -> Shell [
+    let n = s.clone()
+    let keep: List<Notif> = []
+    let i = 0
+    while i < n.notifs.len() [
+        if n.notifs[i].id != id [
+            keep.push(n.notifs[i].clone())
+        ] else [
+            if reason != 3 [
+                hw_notif_closed(id, reason)
+            ]
+        ]
+        i = i + 1
+    ]
+    n.notifs = keep
+    end n
+]
+
+!! ---------------------------------------------------------------- aktualizacja stanu
+fun shell_update(s: Shell, m: Message) -> Shell [
+    let n = s.clone()
+    n.tasks = taskbar_update(n.tasks.clone(), m)
+    n.outputs = outputs_update(n.outputs.clone(), m)
+    if m.id == "tick" [
+        n.ticks = n.ticks + 1
+        n.clock = clock_now()
+        if n.ticks % 8 == 0 [
+            n.vol = vol_get()
+            n.muted = vol_muted()
+            n.bat = battery_pct()
+            n.charging = battery_charging_now()
+        ]
+        if n.ticks % 20 == 0 [
+            n.net = net_get()
+        ]
+    ]
+    let h = tl_handle_of(m)
+    if h >= 0 [
+        toplevel_action(h, "activate")
+    ]
+    if m.id == "launcher" [
+        gui_spawn(hw_self(), ["launcher"])
+    ]
+    if m.id == "quick" [
+        gui_spawn(hw_self(), ["popup", "quick"])
+    ]
+    if m.id == "calendar" [
+        gui_spawn(hw_self(), ["popup", "calendar"])
+    ]
+    if m.id == "power" [
+        gui_spawn(hw_self(), ["power"])
+    ]
+    if m.id == "lock" [
+        do_lock()
+    ]
+    if m.id == "settings" [
+        gui_spawn(hw_self(), ["settings"])
+    ]
+    if s_starts(m.id.clone(), "nd:") [
+        n = notif_remove(n.clone(), parse_i(s_sub(m.id.clone(), 3, slen(m.id.clone()))), 2)
+    ]
+    end n
+]
+
+!! ---------------------------------------------------------------- petla glowna
+fun geom_key(s: Shell) -> Str [
+    let k = panel_opts(s.c.clone(), "") + "|" + cget(s.c.clone(), "wallpaper.mode") + "|" + cget(s.c.clone(), "wallpaper.image")
+    let i = 0
+    while i < s.outputs.len() [
+        k = k + "|" + s.outputs[i].name
+        i = i + 1
+    ]
+    end k
+]
+
+fun shell_outputs(s: Shell) -> List<Str> [
+    let o: List<Str> = []
+    let i = 0
+    while i < s.outputs.len() [
+        o.push(s.outputs[i].name.clone())
+        i = i + 1
+    ]
+    if o.len() == 0 and s.ticks >= 2 [
+        o.push("")
+    ]
+    end o
+]
+
+fun run_shell() [
+    if hw_single("shell", 2) == 0 [
+        log("hwde shell juz dziala ")
+        end
+    ]
+    let app = app_new_headless_shell()
+    if app.backend == "headless" or s_starts(app.backend.clone(), "error") [
+        log("hwde shell wymaga kompozytora Wayland (backend: " + app.backend + ")")
+        end
+    ]
+    let s = shell_new()
+    app.set_theme(s.th.clone())
+    app.set_css(hw_css(s.c.clone(), s.th.clone()))
+    app.set_tick(1000)
+    let nstate = hw_notif_start()
+    if nstate < 0 [
+        log("brak szyny D-Bus - powiadomienia wylaczone")
+    ]
+    if nstate == 0 [
+        log("inny demon powiadomien juz dziala")
+    ]
+    let idle_min = cget_i(s.c.clone(), "lock.timeout")
+    if idle_min > 0 [
+        gui_idle_watch(idle_min * 60000)
+    ]
+    let off_min = cget_i(s.c.clone(), "lock.screen_off")
+    if off_min > 0 and off_min > idle_min [
+        gui_idle_watch(off_min * 60000)
+    ]
+    let wins: List<Win> = []
+    let gkey = ""
+    let toast_win = -1
+    let toast_n = 0
+    wall_apply_image(s.c.clone())
+    while app.running() [
+        !! przeladowanie konfiguracji
+        let stamp = conf_mtime_sum()
+        if stamp != s.stamp [
+            let nc = conf_load()
+            s.c = nc.clone()
+            s.th = hw_theme(nc.clone())
+            s.stamp = stamp
+            app.set_theme(s.th.clone())
+            app.set_css(hw_css(nc.clone(), s.th.clone()))
+            wall_apply_image(nc.clone())
+        ]
+        !! okna paneli i tapet - przy zmianie geometrii/monitorow otwieramy od nowa
+        let key = geom_key(s.clone())
+        if key != gkey [
+            let i = 0
+            while i < wins.len() [
+                app.close_window(wins[i].id)
+                i = i + 1
+            ]
+            wins = []
+            let outs = shell_outputs(s.clone())
+            if outs.len() > 0 [
+                gkey = key
+                let k = 0
+                while k < outs.len() [
+                    if not wall_is_image(s.c.clone()) [
+                        let wo = wallpaper_opts("hwde-wallpaper")
+                        if outs[k] != "" [
+                            wo = wo + ";output=" + outs[k]
+                        ]
+                        let wid = app.open_window("layer", "wallpaper", 0, 0, wo)
+                        if wid >= 0 [
+                            wins.push(Win(wid, "wall", outs[k].clone()))
+                        ]
+                    ]
+                    let bid = app.open_window("layer", "panel", 0, panel_h(s.c.clone()), panel_opts(s.c.clone(), outs[k].clone()))
+                    if bid >= 0 [
+                        wins.push(Win(bid, "bar", outs[k].clone()))
+                    ]
+                    k = k + 1
+                ]
+            ]
+        ]
+        !! okno powiadomien
+        let now = gui_now_ms()
+        s = toasts_update(s.clone(), now)
+        if s.notifs.len() != toast_n [
+            if toast_win >= 0 [
+                app.close_window(toast_win)
+                toast_win = -1
+            ]
+            toast_n = s.notifs.len()
+            if toast_n > 0 [
+                let top = panel_h(s.c.clone()) + panel_m(s.c.clone()) * 2
+                let right = 8
+                let edge = "top,right"
+                let mg = (top as Str) + "," + (right as Str) + ",0,0"
+                if cget(s.c.clone(), "panel.position") == "bottom" [
+                    edge = "bottom,right"
+                    mg = "0," + (right as Str) + "," + (top as Str) + ",0"
+                ]
+                toast_win = app.open_window("layer", "notifications", 384, toast_h(toast_n), layer_opts("overlay", edge, 0, mg, "none", "hwde-notify"))
+            ]
+        ]
+        let uis: List<Element> = []
+        for id in app.window_ids() [
+            let e = bar_view(s.clone())
+            if id == toast_win [
+                e = toasts_view(s.clone())
+            ]
+            let w = 0
+            while w < wins.len() [
+                if wins[w].id == id and wins[w].kind == "wall" [
+                    e = wall_view(s.c.clone(), s.th.clone())
+                ]
+                w = w + 1
+            ]
+            uis.push(e)
+        ]
+        for m in app.frame(uis) [
+            if m.id == "idle" and m.flag [
+                let lm = cget_i(s.c.clone(), "lock.timeout") * 60000
+                let om = cget_i(s.c.clone(), "lock.screen_off") * 60000
+                if lm > 0 and m.idx == lm [
+                    do_lock()
+                ]
+                if om > 0 and m.idx == om and hw_which("wlopm") [
+                    hw_status("wlopm", ["--off", "*"])
+                ]
+            ]
+            if m.id == "idle" and not m.flag and hw_which("wlopm") [
+                hw_status("wlopm", ["--on", "*"])
+            ]
+            s = shell_update(s.clone(), m)
+        ]
+    ]
+    hw_single_done("shell")
+]
