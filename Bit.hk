@@ -1,1 +1,17 @@
+[package]
+-> name        => HWDE
+-> version     => 0.1
+-> description => HWDE - HackerOS Wayland Desktop Environment: lekka, nowoczesna i dostosowywalna powloka dla labwc (HackerScript + gui)
+-> authors     => ["HackerOS Team"]
+-> license     => MIT
+-> lang        => HackerScript
+-> using       => 0.5
 
+[build]
+-> link => static
+
+[default-build]
+-> profile => release
+
+[dependencies]
+-> gui => newest
