@@ -75,4 +75,4 @@ klawiaturą i uruchamianiem aplikacji, lista okien, popupy (szybkie ustawienia, 
 poprawne odblokowanie hasłem (protokół `unix_chkpwd` sprawdzony ręcznie), skala ułamkowa.
 
 ## Licencja
-MIT.
+MPL-2.0
