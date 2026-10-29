@@ -3,6 +3,7 @@ include <sys>
 include <conf>
 include <sysinfo>
 include <labwc>
+include <wallpaper>
 
 !! ============================================================================
 !! Ustawienia HWDE - jedyna wbudowana aplikacja. Zmienia hwde.conf; powloka i
@@ -22,11 +23,16 @@ struct SState [
     new_cmd: Str,
     new_auto: Str,
     confirm: Bool,
-    status: Str
+    status: Str,
+    query: Str,
+    wall_files: List<Str>,
+    wall_page: Int,
+    cursors: List<Str>,
+    backups: List<Str>
 ]
 
 fun page_count() -> Int [
-    end 8
+    end 9
 ]
 
 fun page_title(c: Conf, i: Int) -> Str [
@@ -34,29 +40,32 @@ fun page_title(c: Conf, i: Int) -> Str [
         end tr(c.clone(), "Wygląd", "Appearance")
     ]
     if i == 1 [
-        end tr(c.clone(), "Panel", "Panel")
+        end tr(c.clone(), "Tapety", "Wallpapers")
     ]
     if i == 2 [
-        end tr(c.clone(), "Okna", "Windows")
+        end tr(c.clone(), "Panel", "Panel")
     ]
     if i == 3 [
-        end tr(c.clone(), "Wejście", "Input")
+        end tr(c.clone(), "Okna", "Windows")
     ]
     if i == 4 [
-        end tr(c.clone(), "Ekran i dźwięk", "Display & sound")
+        end tr(c.clone(), "Wejście", "Input")
     ]
     if i == 5 [
-        end tr(c.clone(), "Powiadomienia i blokada", "Notifications & lock")
+        end tr(c.clone(), "Ekran i dźwięk", "Display & sound")
     ]
     if i == 6 [
+        end tr(c.clone(), "Powiadomienia i blokada", "Notifications & lock")
+    ]
+    if i == 7 [
         end tr(c.clone(), "Skróty i aplikacje", "Shortcuts & apps")
     ]
     end tr(c.clone(), "System", "System")
 ]
 
 fun page_icon(i: Int) -> Str [
-    let ic = ["image", "layout-grid", "maximize", "sliders-horizontal", "monitor", "bell", "terminal", "info"]
-    end ic[iclamp(i, 0, 7)].clone()
+    let ic = ["sun", "image", "layout-grid", "maximize", "sliders-horizontal", "monitor", "bell", "terminal", "info"]
+    end ic[iclamp(i, 0, 8)].clone()
 ]
 
 !! ---------------------------------------------------------------- wartosci wyliczeniowe
@@ -71,7 +80,16 @@ fun enum_vals(key: Str) -> List<Str> [
         end ["24h", "12h"]
     ]
     if key == "wallpaper.mode" [
-        end ["gradient", "color", "image"]
+        end ["gradient", "color", "image", "slideshow"]
+    ]
+    if key == "wallpaper.fit" [
+        end ["fill", "fit", "stretch", "center", "tile"]
+    ]
+    if key == "wallpaper.order" [
+        end ["random", "sequential"]
+    ]
+    if key == "wallpaper.interval" [
+        end ["1", "5", "10", "15", "30", "60", "120"]
     ]
     if key == "windows.titlebar" [
         end ["icon:iconify,max,close", ":iconify,max,close", "close,iconify,max:", "icon:close"]
@@ -123,7 +141,34 @@ fun enum_label(c: Conf, key: Str, v: Str) -> Str [
         if v == "color" [
             end tr(c.clone(), "Jeden kolor", "Solid color")
         ]
-        end tr(c.clone(), "Obraz (swaybg)", "Image (swaybg)")
+        if v == "image" [
+            end tr(c.clone(), "Obraz (swaybg)", "Image (swaybg)")
+        ]
+        end tr(c.clone(), "Pokaz slajdów", "Slideshow")
+    ]
+    if key == "wallpaper.fit" [
+        if v == "fill" [
+            end tr(c.clone(), "Wypełnij (przytnij)", "Fill (crop)")
+        ]
+        if v == "fit" [
+            end tr(c.clone(), "Dopasuj (z paskami)", "Fit (letterbox)")
+        ]
+        if v == "stretch" [
+            end tr(c.clone(), "Rozciągnij", "Stretch")
+        ]
+        if v == "center" [
+            end tr(c.clone(), "Wyśrodkuj", "Center")
+        ]
+        end tr(c.clone(), "Kafelki", "Tile")
+    ]
+    if key == "wallpaper.order" [
+        if v == "random" [
+            end tr(c.clone(), "Losowo", "Random")
+        ]
+        end tr(c.clone(), "Po kolei", "In order")
+    ]
+    if key == "wallpaper.interval" [
+        end v + " min"
     ]
     if key == "windows.titlebar" [
         if v == "icon:iconify,max,close" [
@@ -266,8 +311,109 @@ fun page_appearance(s: SState) -> Element [
     let cur = cget(c.clone(), "appearance.accent")
     let sw = row([ swatch("neutral", tr(c.clone(), "Neutralny", "Neutral"), cur.clone(), th.dark), swatch("blue", tr(c.clone(), "Niebieski", "Blue"), cur.clone(), th.dark), swatch("teal", tr(c.clone(), "Morski", "Teal"), cur.clone(), th.dark), swatch("green", tr(c.clone(), "Zielony", "Green"), cur.clone(), th.dark), swatch("yellow", tr(c.clone(), "Żółty", "Yellow"), cur.clone(), th.dark), swatch("orange", tr(c.clone(), "Pomarańczowy", "Orange"), cur.clone(), th.dark), swatch("red", tr(c.clone(), "Czerwony", "Red"), cur.clone(), th.dark), swatch("pink", tr(c.clone(), "Różowy", "Pink"), cur.clone(), th.dark), swatch("purple", tr(c.clone(), "Fioletowy", "Purple"), cur.clone(), th.dark) ]).spacing(2.0).align_y(1)
     let look: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Motyw", "Theme"), tr(c.clone(), "Szaro-czarny ciemny albo biało-jasnoszary jasny", "Gray-black dark or white/light-gray light"), "appearance.mode"), srow(th.clone(), tr(c.clone(), "Kolor akcentu", "Accent color"), tr(c.clone(), "Neutralny = biel/czerń zależnie od motywu", "Neutral = white/black depending on the theme"), sw), r_text(s.clone(), tr(c.clone(), "Własny akcent", "Custom accent"), tr(c.clone(), "np. #ff7a00 (nadpisuje wybór powyżej)", "e.g. #ff7a00 (overrides the choice above)"), "appearance.accent", "neutral"), r_slider(s.clone(), tr(c.clone(), "Zaokrąglenie", "Corner radius"), "", "appearance.radius", 0.0, 24.0, " px"), r_slider(s.clone(), tr(c.clone(), "Skala czcionki", "Font scale"), "", "appearance.font_scale", 80.0, 150.0, "%"), r_toggle(s.clone(), tr(c.clone(), "Animacje", "Animations"), "", "appearance.animations") ]
-    let wall: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Rodzaj tła", "Background type"), "", "wallpaper.mode"), r_text(s.clone(), tr(c.clone(), "Kolor 1", "Color 1"), tr(c.clone(), "puste = zgodnie z motywem, np. #2a2a2f", "empty = follow theme, e.g. #2a2a2f"), "wallpaper.color1", "#2a2a2f"), r_text(s.clone(), tr(c.clone(), "Kolor 2", "Color 2"), tr(c.clone(), "koniec gradientu", "gradient end"), "wallpaper.color2", "#0a0a0b"), r_slider(s.clone(), tr(c.clone(), "Kąt gradientu", "Gradient angle"), "", "wallpaper.angle", 0.0, 360.0, "°"), r_text(s.clone(), tr(c.clone(), "Plik obrazu", "Image file"), tr(c.clone(), "wymaga programu swaybg", "requires swaybg"), "wallpaper.image", "~/Pictures/tapeta.png") ]
-    end column([ page_head(s.clone(), 0), group(th.clone(), tr(c.clone(), "Motyw", "Theme"), look), group(th.clone(), tr(c.clone(), "Tapeta", "Wallpaper"), wall) ]).spacing(20.0).fill_width()
+    let curs = ""
+    let ci = 0
+    while ci < s.cursors.len() and ci < 8 [
+        if ci > 0 [
+            curs = curs + ", "
+        ]
+        curs = curs + s.cursors[ci]
+        ci = ci + 1
+    ]
+    let cur_rows: List<Element> = [ r_text(s.clone(), tr(c.clone(), "Motyw kursora", "Cursor theme"), tr(c.clone(), "puste = domyślny; znalezione: ", "empty = default; found: ") + curs, "appearance.cursor_theme", "Adwaita"), r_slider(s.clone(), tr(c.clone(), "Rozmiar kursora", "Cursor size"), tr(c.clone(), "Zmiana działa po ponownym zalogowaniu", "Takes effect after logging in again"), "appearance.cursor_size", 16.0, 48.0, " px"), r_toggle(s.clone(), tr(c.clone(), "Synchronizuj z aplikacjami GTK", "Sync with GTK apps"), tr(c.clone(), "Jasny/ciemny motyw i kursor przez gsettings", "Light/dark mode and cursor via gsettings"), "appearance.gtk_sync") ]
+    end column([ page_head(s.clone(), 0), group(th.clone(), tr(c.clone(), "Motyw", "Theme"), look), group(th.clone(), tr(c.clone(), "Kursor i aplikacje GTK", "Cursor & GTK apps"), cur_rows) ]).spacing(20.0).fill_width()
+]
+
+fun wp_swatch(s: SState, i: Int) -> Element [
+    let c = s.c.clone()
+    let th = s.th.clone()
+    let id = wall_preset_field(i, 0)
+    let bw = 0.0
+    let ring = 0
+    if cget(c.clone(), "wallpaper.preset") == id and cget(c.clone(), "wallpaper.mode") == "gradient" [
+        bw = 2.5
+        ring = th.p.text
+    ]
+    let dot = container(space()).size_px(84.0, 52.0).radius(10.0).gradient(parse_color(wall_preset_field(i, 3)), parse_color(wall_preset_field(i, 4)), parse_f(wall_preset_field(i, 5))).border(bw, ring)
+    end tooltip(button_with(dot).on_press("wp:" + id).class("ghost").padding(4.0).radius(12.0), tr(c.clone(), wall_preset_field(i, 1), wall_preset_field(i, 2)))
+]
+
+fun wp_presets_view(s: SState) -> Element [
+    let rows: List<Element> = []
+    let cur: List<Element> = []
+    let n = wall_presets().len()
+    let i = 0
+    while i < n [
+        cur.push(wp_swatch(s.clone(), i))
+        if cur.len() == 6 or i == n - 1 [
+            rows.push(row(cur).spacing(6.0))
+            cur = []
+        ]
+        i = i + 1
+    ]
+    end container(column(rows).spacing(6.0)).padding(12.0)
+]
+
+fun wp_gallery(s: SState) -> Element [
+    let c = s.c.clone()
+    let th = s.th.clone()
+    let rows: List<Element> = []
+    let total = s.wall_files.len()
+    let per = 8
+    let pages = (total + per - 1) / per
+    let pg = iclamp(s.wall_page, 0, imax(pages - 1, 0))
+    let cur = wall_effective(c.clone(), th.dark)
+    let i = pg * per
+    while i < total and i < pg * per + per [
+        let f = s.wall_files[i].clone()
+        let label = row([ icon("image").size(16.0), column([ text(wall_base(f.clone())).size(13.0), text(f.clone()).size(11.0).color(th.p.muted) ]).spacing(1.0).fill_width() ]).spacing(12.0).align_y(1)
+        let b = button_with(label).on_press("wi:" + (i as Str)).class("ghost").fill_width().padding_xy(14.0, 7.0)
+        b.st.ax = 0
+        if f == cur [
+            b = b.background(with_alpha(th.p.text, 24))
+        ]
+        rows.push(b)
+        i = i + 1
+    ]
+    if total == 0 [
+        rows.push(srow(th.clone(), tr(c.clone(), "Nie znaleziono obrazów", "No images found"), tr(c.clone(), "Szukano w ~/Pictures, ~/Pictures/Wallpapers, ~/.local/share/hwde/wallpapers, /usr/share/backgrounds", "Searched ~/Pictures, ~/Pictures/Wallpapers, ~/.local/share/hwde/wallpapers, /usr/share/backgrounds"), text("")))
+    ]
+    let pager = row([ button("").with_icon("chevron-left").on_press("wgp:-1").class("ghost icon"), text(((pg + 1) as Str) + " / " + (imax(pages, 1) as Str)).size(13.0), button("").with_icon("chevron-right").on_press("wgp:1").class("ghost icon"), space().fill_width(), button(tr(c.clone(), "Odśwież listę", "Refresh list")).with_icon("refresh-cw").on_press("wref") ]).spacing(8.0).align_y(1).padding_xy(14.0, 8.0).fill_width()
+    rows.push(pager)
+    end column(rows).spacing(0.0).fill_width()
+]
+
+fun page_wallpaper(s: SState) -> Element [
+    let c = s.c.clone()
+    let th = s.th.clone()
+    let mode = cget(c.clone(), "wallpaper.mode")
+    let kids: List<Element> = [ page_head(s.clone(), 1) ]
+    let top: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Rodzaj tła", "Background type"), tr(c.clone(), "Gradient i kolor rysuje powłoka, obrazy i pokaz slajdów — swaybg", "Gradient and color are drawn by the shell, images and slideshow by swaybg"), "wallpaper.mode") ]
+    if (mode == "image" or mode == "slideshow") and not hw_which("swaybg") [
+        top.push(srow(th.clone(), tr(c.clone(), "Brak programu swaybg", "swaybg is not installed"), tr(c.clone(), "Zainstaluj swaybg, aby wyświetlać obrazy; do tego czasu działa gradient", "Install swaybg to show images; a gradient is used until then"), icon("triangle-alert").size(18.0)))
+    ]
+    kids.push(group(th.clone(), tr(c.clone(), "Tło", "Background"), top))
+    kids.push(group(th.clone(), tr(c.clone(), "Gotowe gradienty", "Gradient presets"), [ wp_presets_view(s.clone()) ]))
+    let own: List<Element> = [ r_text(s.clone(), tr(c.clone(), "Kolor 1", "Color 1"), tr(c.clone(), "puste = zgodnie z motywem; tło pod obrazem", "empty = follow theme; also the color behind an image"), "wallpaper.color1", "#2a2a2f"), r_text(s.clone(), tr(c.clone(), "Kolor 2", "Color 2"), tr(c.clone(), "koniec gradientu", "gradient end"), "wallpaper.color2", "#0a0a0b"), r_slider(s.clone(), tr(c.clone(), "Kąt gradientu", "Gradient angle"), "", "wallpaper.angle", 0.0, 360.0, "°") ]
+    kids.push(group(th.clone(), tr(c.clone(), "Własny gradient / kolor", "Custom gradient / color"), own))
+    let img: List<Element> = [ r_text(s.clone(), tr(c.clone(), "Plik obrazu", "Image file"), tr(c.clone(), "ścieżka, może zaczynać się od ~/", "path, may start with ~/"), "wallpaper.image", "~/Pictures/tapeta.png"), r_pick(s.clone(), tr(c.clone(), "Dopasowanie", "Fit"), "", "wallpaper.fit"), r_text(s.clone(), tr(c.clone(), "Obraz dla motywu ciemnego", "Image for the dark theme"), tr(c.clone(), "puste = ten sam obraz", "empty = same image"), "wallpaper.image_dark", ""), r_text(s.clone(), tr(c.clone(), "Obraz dla motywu jasnego", "Image for the light theme"), tr(c.clone(), "przełącza się razem z motywem (także automatycznym)", "switches with the theme (also the automatic one)"), "wallpaper.image_light", "") ]
+    kids.push(group(th.clone(), tr(c.clone(), "Obraz", "Image"), img))
+    kids.push(group(th.clone(), tr(c.clone(), "Znalezione obrazy (kliknij, aby ustawić)", "Found images (click to set)"), [ wp_gallery(s.clone()) ]))
+    let slide: List<Element> = [ r_text(s.clone(), tr(c.clone(), "Folder", "Folder"), tr(c.clone(), "puste = wszystkie znalezione obrazy", "empty = all found images"), "wallpaper.folder", "~/Pictures/Wallpapers"), r_pick(s.clone(), tr(c.clone(), "Zmieniaj co", "Change every"), "", "wallpaper.interval"), r_pick(s.clone(), tr(c.clone(), "Kolejność", "Order"), "", "wallpaper.order") ]
+    let ctl = row([ button(tr(c.clone(), "Poprzednia", "Previous")).with_icon("skip-back").on_press("wprev"), button(tr(c.clone(), "Następna", "Next")).with_icon("skip-forward").on_press("wnext"), button(tr(c.clone(), "Losowa", "Random")).with_icon("refresh-cw").on_press("wrand") ]).spacing(10.0).padding_xy(16.0, 12.0)
+    slide.push(ctl)
+    kids.push(group(th.clone(), tr(c.clone(), "Pokaz slajdów (tryb „Pokaz slajdów”)", "Slideshow (“Slideshow” mode)"), slide))
+    let mons: List<Element> = []
+    let i = 0
+    while i < s.outputs.len() [
+        let o = s.outputs[i].clone()
+        mons.push(r_text(s.clone(), o.name.clone(), tr(c.clone(), "obraz tylko dla tego monitora; puste = wspólna tapeta", "image for this monitor only; empty = shared wallpaper"), "wallpaper.out." + o.name, "~/Pictures/" + o.name + ".png"))
+        i = i + 1
+    ]
+    if mons.len() > 0 [
+        kids.push(group(th.clone(), tr(c.clone(), "Tapeta osobno dla monitora", "Per-monitor wallpaper"), mons))
+    ]
+    end column(kids).spacing(20.0).fill_width()
 ]
 
 fun page_panel(s: SState) -> Element [
@@ -276,7 +422,8 @@ fun page_panel(s: SState) -> Element [
     let a: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Położenie", "Position"), "", "panel.position"), r_toggle(s.clone(), tr(c.clone(), "Pływający panel", "Floating panel"), tr(c.clone(), "Zaokrąglony, z marginesem od krawędzi", "Rounded, with a margin from the edge"), "panel.floating"), r_slider(s.clone(), tr(c.clone(), "Wysokość", "Height"), "", "panel.height", 28.0, 64.0, " px"), r_slider(s.clone(), tr(c.clone(), "Margines", "Margin"), "", "panel.margin", 0.0, 24.0, " px"), r_slider(s.clone(), tr(c.clone(), "Przezroczystość tła", "Background opacity"), "", "appearance.panel_opacity", 40.0, 100.0, "%") ]
     let b: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Format godziny", "Clock format"), "", "panel.clock"), r_toggle(s.clone(), tr(c.clone(), "Sekundy", "Seconds"), "", "panel.seconds"), r_toggle(s.clone(), tr(c.clone(), "Data obok zegara", "Date next to the clock"), "", "panel.date"), r_slider(s.clone(), tr(c.clone(), "Maks. okien na pasku zadań", "Max. taskbar windows"), "", "panel.max_tasks", 2.0, 16.0, "") ]
     let m: List<Element> = [ r_text(s.clone(), tr(c.clone(), "Lewa strona", "Left side"), tr(c.clone(), "moduły: launcher, tasks, clock, date, status, power, lock, settings", "modules: launcher, tasks, clock, date, status, power, lock, settings"), "panel.left", "launcher,tasks"), r_text(s.clone(), tr(c.clone(), "Środek", "Center"), "", "panel.center", "clock"), r_text(s.clone(), tr(c.clone(), "Prawa strona", "Right side"), "", "panel.right", "status,power") ]
-    end column([ page_head(s.clone(), 1), group(th.clone(), tr(c.clone(), "Wygląd panelu", "Panel look"), a), group(th.clone(), tr(c.clone(), "Zegar i zadania", "Clock & tasks"), b), group(th.clone(), tr(c.clone(), "Moduły (lista rozdzielana przecinkami)", "Modules (comma separated list)"), m) ]).spacing(20.0).fill_width()
+    let pre = row([ button(tr(c.clone(), "Klasyczny (góra)", "Classic (top)")).on_press("pp:classic"), button(tr(c.clone(), "Dok (dół)", "Dock (bottom)")).on_press("pp:dock"), button(tr(c.clone(), "Minimalny", "Minimal")).on_press("pp:minimal") ]).spacing(10.0).padding_xy(16.0, 12.0)
+    end column([ page_head(s.clone(), 2), group(th.clone(), tr(c.clone(), "Gotowe układy", "Layout presets"), [ pre ]), group(th.clone(), tr(c.clone(), "Wygląd panelu", "Panel look"), a), group(th.clone(), tr(c.clone(), "Zegar i zadania", "Clock & tasks"), b), group(th.clone(), tr(c.clone(), "Moduły (lista rozdzielana przecinkami)", "Modules (comma separated list)"), m) ]).spacing(20.0).fill_width()
 ]
 
 fun page_windows(s: SState) -> Element [
@@ -285,7 +432,7 @@ fun page_windows(s: SState) -> Element [
     let a: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Pasek tytułowy", "Title bar"), "", "windows.titlebar"), r_slider(s.clone(), tr(c.clone(), "Zaokrąglenie rogów", "Corner radius"), "", "windows.corner_radius", 0.0, 24.0, " px"), r_slider(s.clone(), tr(c.clone(), "Grubość ramki", "Border width"), "", "windows.border", 0.0, 6.0, " px"), r_toggle(s.clone(), tr(c.clone(), "Cienie okien", "Window shadows"), "", "windows.shadows"), r_slider(s.clone(), tr(c.clone(), "Odstęp między oknami", "Window gap"), "", "windows.gap", 0.0, 32.0, " px") ]
     let b: List<Element> = [ r_toggle(s.clone(), tr(c.clone(), "Przyciąganie do krawędzi", "Snap to edges"), "", "windows.snap"), r_toggle(s.clone(), tr(c.clone(), "Fokus podąża za myszą", "Focus follows mouse"), "", "windows.focus_follows_mouse"), r_slider(s.clone(), tr(c.clone(), "Liczba pulpitów", "Workspaces"), tr(c.clone(), "Skróty Super+1…4", "Shortcuts Super+1…4"), "windows.workspaces", 1.0, 8.0, "") ]
     let f: List<Element> = [ r_text(s.clone(), tr(c.clone(), "Czcionka tytułów", "Title font"), "", "windows.font", "sans"), r_slider(s.clone(), tr(c.clone(), "Rozmiar czcionki", "Font size"), "", "windows.font_size", 8.0, 16.0, " pt") ]
-    end column([ page_head(s.clone(), 2), group(th.clone(), tr(c.clone(), "Wygląd okien", "Window look"), a), group(th.clone(), tr(c.clone(), "Zachowanie", "Behavior"), b), group(th.clone(), tr(c.clone(), "Czcionka", "Font"), f) ]).spacing(20.0).fill_width()
+    end column([ page_head(s.clone(), 3), group(th.clone(), tr(c.clone(), "Wygląd okien", "Window look"), a), group(th.clone(), tr(c.clone(), "Zachowanie", "Behavior"), b), group(th.clone(), tr(c.clone(), "Czcionka", "Font"), f) ]).spacing(20.0).fill_width()
 ]
 
 fun page_input(s: SState) -> Element [
@@ -293,13 +440,13 @@ fun page_input(s: SState) -> Element [
     let th = s.th.clone()
     let a: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Układ klawiatury", "Keyboard layout"), tr(c.clone(), "Zmiana działa po ponownym zalogowaniu", "Takes effect after logging in again"), "input.layout"), r_text(s.clone(), tr(c.clone(), "Wariant", "Variant"), "", "input.variant", "np. dvorak"), r_text(s.clone(), tr(c.clone(), "Opcje XKB", "XKB options"), "", "input.options", "grp:alt_shift_toggle"), r_slider(s.clone(), tr(c.clone(), "Szybkość powtarzania", "Repeat rate"), "", "input.repeat_rate", 5.0, 60.0, "/s"), r_slider(s.clone(), tr(c.clone(), "Opóźnienie powtarzania", "Repeat delay"), "", "input.repeat_delay", 150.0, 1000.0, " ms"), r_toggle(s.clone(), "NumLock", tr(c.clone(), "Włączony przy starcie", "On at startup"), "input.numlock") ]
     let b: List<Element> = [ r_toggle(s.clone(), tr(c.clone(), "Stuknięcie = kliknięcie", "Tap to click"), "", "input.tap"), r_toggle(s.clone(), tr(c.clone(), "Naturalne przewijanie", "Natural scrolling"), "", "input.natural_scroll"), r_toggle(s.clone(), tr(c.clone(), "Wyłącz podczas pisania", "Disable while typing"), "", "input.disable_while_typing"), r_slider(s.clone(), tr(c.clone(), "Szybkość wskaźnika", "Pointer speed"), "", "input.pointer_speed", -1.0, 1.0, ""), r_pick(s.clone(), tr(c.clone(), "Przyspieszenie", "Acceleration"), "", "input.accel") ]
-    end column([ page_head(s.clone(), 3), group(th.clone(), tr(c.clone(), "Klawiatura", "Keyboard"), a), group(th.clone(), tr(c.clone(), "Mysz i touchpad", "Mouse & touchpad"), b) ]).spacing(20.0).fill_width()
+    end column([ page_head(s.clone(), 4), group(th.clone(), tr(c.clone(), "Klawiatura", "Keyboard"), a), group(th.clone(), tr(c.clone(), "Mysz i touchpad", "Mouse & touchpad"), b) ]).spacing(20.0).fill_width()
 ]
 
 fun page_display(s: SState) -> Element [
     let c = s.c.clone()
     let th = s.th.clone()
-    let kids: List<Element> = [ page_head(s.clone(), 4) ]
+    let kids: List<Element> = [ page_head(s.clone(), 5) ]
     let mons: List<Element> = []
     let i = 0
     while i < s.outputs.len() [
@@ -341,6 +488,11 @@ fun page_display(s: SState) -> Element [
         snd.push(srow(th.clone(), tr(c.clone(), "Nie wykryto sterowania dźwiękiem ani jasnością", "No audio or brightness control detected"), tr(c.clone(), "Potrzebne: wpctl/pactl, brightnessctl", "Needs: wpctl/pactl, brightnessctl"), text("")))
     ]
     kids.push(group(th.clone(), tr(c.clone(), "Dźwięk i jasność", "Sound & brightness"), snd))
+    let nl: List<Element> = [ r_toggle(s.clone(), tr(c.clone(), "Nocne światło", "Night light"), tr(c.clone(), "Cieplejsza barwa ekranu wieczorem (wlsunset)", "Warmer screen color in the evening (wlsunset)"), "night.enabled"), r_slider(s.clone(), tr(c.clone(), "Temperatura barwy", "Color temperature"), tr(c.clone(), "niżej = cieplej", "lower = warmer"), "night.temp", 2500.0, 6500.0, " K"), r_text(s.clone(), tr(c.clone(), "Od godziny", "From"), "", "night.start", "20:00"), r_text(s.clone(), tr(c.clone(), "Do godziny", "Until"), "", "night.end", "07:00") ]
+    if not hw_which("wlsunset") [
+        nl.push(srow(th.clone(), tr(c.clone(), "Brak programu wlsunset", "wlsunset is not installed"), tr(c.clone(), "Zainstaluj wlsunset, aby nocne światło działało", "Install wlsunset for the night light to work"), icon("triangle-alert").size(18.0)))
+    ]
+    kids.push(group(th.clone(), tr(c.clone(), "Nocne światło", "Night light"), nl))
     end column(kids).spacing(20.0).fill_width()
 ]
 
@@ -349,7 +501,7 @@ fun page_notify(s: SState) -> Element [
     let th = s.th.clone()
     let a: List<Element> = [ r_toggle(s.clone(), tr(c.clone(), "Powiadomienia", "Notifications"), tr(c.clone(), "Wbudowany demon org.freedesktop.Notifications", "Built-in org.freedesktop.Notifications daemon"), "notify.enabled"), r_toggle(s.clone(), tr(c.clone(), "Nie przeszkadzać", "Do not disturb"), "", "notify.dnd"), r_slider(s.clone(), tr(c.clone(), "Czas wyświetlania", "Display time"), "", "notify.timeout", 2.0, 20.0, " s"), r_slider(s.clone(), tr(c.clone(), "Maks. jednocześnie", "Max. at once"), "", "notify.max", 1.0, 8.0, "") ]
     let b: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Zablokuj po bezczynności", "Lock after idle"), tr(c.clone(), "Zmiana działa po restarcie powłoki", "Applies after the shell restarts"), "lock.timeout"), r_pick(s.clone(), tr(c.clone(), "Wyłącz ekran po bezczynności", "Turn screen off after idle"), tr(c.clone(), "Wymaga programu wlopm", "Requires wlopm"), "lock.screen_off") ]
-    end column([ page_head(s.clone(), 5), group(th.clone(), tr(c.clone(), "Powiadomienia", "Notifications"), a), group(th.clone(), tr(c.clone(), "Blokada ekranu", "Screen lock"), b) ]).spacing(20.0).fill_width()
+    end column([ page_head(s.clone(), 6), group(th.clone(), tr(c.clone(), "Powiadomienia", "Notifications"), a), group(th.clone(), tr(c.clone(), "Blokada ekranu", "Screen lock"), b) ]).spacing(20.0).fill_width()
 ]
 
 fun list_keys(c: Conf, prefix: Str) -> List<Str> [
@@ -392,7 +544,17 @@ fun page_apps(s: SState) -> Element [
         k = k + 1
     ]
     auto.push(row([ text_input(tr(c.clone(), "Polecenie uruchamiane przy logowaniu", "Command to run at login"), s.new_auto.clone()).id("new_auto").on_input("na").on_submit("aadd").fill_width(), button(tr(c.clone(), "Dodaj", "Add")).with_icon("plus").on_press("aadd").class("primary") ]).spacing(10.0).align_y(1).padding_xy(16.0, 10.0).fill_width())
-    end column([ page_head(s.clone(), 6), group(th.clone(), tr(c.clone(), "Aplikacje domyślne", "Default apps"), apps), group(th.clone(), tr(c.clone(), "Skróty klawiszowe (W = Super, A = Alt, C = Ctrl, S = Shift)", "Keyboard shortcuts (W = Super, A = Alt, C = Ctrl, S = Shift)"), rows), group(th.clone(), tr(c.clone(), "Autostart", "Autostart"), auto) ]).spacing(20.0).fill_width()
+    end column([ page_head(s.clone(), 7), group(th.clone(), tr(c.clone(), "Aplikacje domyślne", "Default apps"), apps), group(th.clone(), tr(c.clone(), "Skróty klawiszowe (W = Super, A = Alt, C = Ctrl, S = Shift)", "Keyboard shortcuts (W = Super, A = Alt, C = Ctrl, S = Shift)"), rows), group(th.clone(), tr(c.clone(), "Autostart", "Autostart"), auto) ]).spacing(20.0).fill_width()
+]
+
+fun hl_version_line() -> Str [
+    let hl = hl_path()
+    if hl == "" [
+        end ""
+    ]
+    let t = out_of(hl, ["version"])
+    let p = s_split(t, "\n")
+    end trim(p[0].clone())
 ]
 
 fun page_system(s: SState) -> Element [
@@ -403,19 +565,133 @@ fun page_system(s: SState) -> Element [
     if hw_which("labwc") [
         lw = out_of("labwc", ["--version"])
     ]
+    let hlv = hl_version_line()
+    let hl_show = tr(c.clone(), "nie znaleziono — używany uproszczony czytnik konfiguracji", "not found — using the simplified config reader")
+    if hlv != "" [
+        hl_show = hlv
+    ]
     let a: List<Element> = [ r_pick(s.clone(), tr(c.clone(), "Język", "Language"), "", "general.language") ]
     let reset_label = tr(c.clone(), "Przywróć domyślne", "Reset to defaults")
     if s.confirm [
         reset_label = tr(c.clone(), "Na pewno? Kliknij ponownie", "Sure? Click again")
     ]
-    let acts = row([ button(tr(c.clone(), "Edytuj hwde.conf", "Edit hwde.conf")).with_icon("pencil").on_press("edit_conf"), button(tr(c.clone(), "Edytuj custom.css", "Edit custom.css")).with_icon("pencil").on_press("edit_css"), button(tr(c.clone(), "Przeładuj labwc", "Reload labwc")).with_icon("refresh-cw").on_press("reload"), button(reset_label).with_icon("trash").class("danger").on_press("reset") ]).spacing(10.0)
-    let b: List<Element> = [ srow(th.clone(), "HWDE", tr(c.clone(), "HackerOS Wayland Desktop Environment", "HackerOS Wayland Desktop Environment"), text("0.1").bold()), srow(th.clone(), tr(c.clone(), "Kompozytor", "Compositor"), "", text(lw.clone()).size(13.0)), srow(th.clone(), tr(c.clone(), "Jądro", "Kernel"), "", text(kern.clone()).size(13.0)), srow(th.clone(), tr(c.clone(), "Konfiguracja", "Configuration"), conf_path(), text("")) ]
-    end column([ page_head(s.clone(), 7), group(th.clone(), tr(c.clone(), "Ogólne", "General"), a), group(th.clone(), tr(c.clone(), "O systemie", "About"), b), acts, text(s.status.clone()).size(12.0).color(th.p.subtext) ]).spacing(20.0).fill_width()
+    let acts1 = row([ button(tr(c.clone(), "Edytuj hwde.conf", "Edit hwde.conf")).with_icon("pencil").on_press("edit_conf"), button(tr(c.clone(), "Sprawdź składnię", "Check syntax")).with_icon("check").on_press("chk"), button(tr(c.clone(), "Edytuj custom.css", "Edit custom.css")).with_icon("pencil").on_press("edit_css") ]).spacing(10.0)
+    let acts2 = row([ button(tr(c.clone(), "Przeładuj labwc", "Reload labwc")).with_icon("refresh-cw").on_press("reload"), button(reset_label).with_icon("trash").class("danger").on_press("reset") ]).spacing(10.0)
+    let acts = column([ acts1, acts2 ]).spacing(10.0)
+    let bk: List<Element> = [ srow(th.clone(), tr(c.clone(), "Kopia zapasowa", "Backup"), conf_backup_dir(), button(tr(c.clone(), "Utwórz kopię", "Create backup")).with_icon("download").on_press("bk")) ]
+    let i = 0
+    while i < s.backups.len() [
+        let name = wall_base(s.backups[i].clone())
+        bk.push(srow(th.clone(), name, "", button(tr(c.clone(), "Przywróć", "Restore")).on_press("rb:" + (i as Str))))
+        i = i + 1
+    ]
+    let b: List<Element> = [ srow(th.clone(), "HWDE", tr(c.clone(), "HackerOS Wayland Desktop Environment", "HackerOS Wayland Desktop Environment"), text("0.2").bold()), srow(th.clone(), "Hacker Lang", tr(c.clone(), "interpreter wykonujący hwde.conf", "interpreter that runs hwde.conf"), text(hl_show).size(13.0)), srow(th.clone(), tr(c.clone(), "Kompozytor", "Compositor"), "", text(lw.clone()).size(13.0)), srow(th.clone(), tr(c.clone(), "Jądro", "Kernel"), "", text(kern.clone()).size(13.0)), srow(th.clone(), tr(c.clone(), "Konfiguracja", "Configuration"), conf_path(), text("")) ]
+    end column([ page_head(s.clone(), 8), group(th.clone(), tr(c.clone(), "Ogólne", "General"), a), group(th.clone(), tr(c.clone(), "Kopie zapasowe", "Backups"), bk), group(th.clone(), tr(c.clone(), "O systemie", "About"), b), acts, text(s.status.clone()).size(12.0).color(th.p.subtext) ]).spacing(20.0).fill_width()
+]
+
+!! ---------------------------------------------------------------- wyszukiwarka ustawien: "strona|PL|EN|slowa kluczowe"
+fun search_index() -> List<Str> [
+    end [
+        "0|Motyw jasny ciemny|Theme light dark|mode auto",
+        "0|Kolor akcentu|Accent color|accent",
+        "0|Zaokrąglenie|Corner radius|radius",
+        "0|Skala czcionki|Font scale|font",
+        "0|Animacje|Animations|",
+        "0|Motyw kursora|Cursor theme|cursor mysz",
+        "0|Rozmiar kursora|Cursor size|cursor",
+        "0|Synchronizacja GTK|GTK sync|gsettings",
+        "1|Tapeta|Wallpaper|background tlo",
+        "1|Gradient|Gradient|preset",
+        "1|Obraz tła|Background image|swaybg plik",
+        "1|Pokaz slajdów|Slideshow|folder interval zmieniaj",
+        "1|Dopasowanie tapety|Wallpaper fit|fill tile stretch",
+        "1|Tapeta na monitor|Per-monitor wallpaper|output",
+        "2|Panel|Panel|pasek bar",
+        "2|Położenie panelu|Panel position|top bottom góra dół dok dock",
+        "2|Zegar|Clock|godzina 12h 24h sekundy",
+        "2|Moduły panelu|Panel modules|launcher tasks status",
+        "2|Pasek zadań|Taskbar|tasks okna",
+        "3|Okna|Windows|titlebar",
+        "3|Pasek tytułowy|Title bar|przyciski buttons",
+        "3|Cienie okien|Window shadows|shadow",
+        "3|Przyciąganie do krawędzi|Snap to edges|snap",
+        "3|Fokus podąża za myszą|Focus follows mouse|focus",
+        "3|Pulpity|Workspaces|desktops",
+        "4|Układ klawiatury|Keyboard layout|layout xkb",
+        "4|Touchpad|Touchpad|tap natural scroll przewijanie",
+        "4|Prędkość wskaźnika|Pointer speed|mysz mouse accel",
+        "5|Skala ekranu|Display scale|monitor wlr-randr",
+        "5|Głośność|Volume|sound dźwięk audio",
+        "5|Jasność|Brightness|backlight",
+        "5|Nocne światło|Night light|wlsunset temperatura",
+        "6|Powiadomienia|Notifications|notify dnd nie przeszkadzać",
+        "6|Blokada ekranu|Screen lock|lock bezczynność idle",
+        "7|Skróty klawiszowe|Keyboard shortcuts|keys bind",
+        "7|Aplikacje domyślne|Default apps|terminal browser przeglądarka",
+        "7|Autostart|Autostart|logowanie startup",
+        "8|Język|Language|lang polski english",
+        "8|Kopia zapasowa|Backup|restore przywróć",
+        "8|Konfiguracja Hacker Lang|Hacker Lang config|hl hwde.conf składnia check",
+        "8|Przywróć domyślne|Reset to defaults|reset"
+    ]
+]
+
+fun search_view(s: SState) -> Element [
+    let c = s.c.clone()
+    let th = s.th.clone()
+    let q = gui_upper(trim(s.query.clone()))
+    let rows: List<Element> = []
+    let idx = search_index()
+    let i = 0
+    while i < idx.len() [
+        let p = s_split(idx[i].clone(), "|")
+        let hay = gui_upper(p[1] + " " + p[2] + " " + p[3])
+        if s_find(hay, q.clone()) >= 0 [
+            let pg = parse_i(p[0].clone())
+            let label = tr(c.clone(), p[1].clone(), p[2].clone())
+            let line = row([ column([ text(label).size(14.0), text(page_title(c.clone(), pg)).size(12.0).color(th.p.subtext) ]).spacing(2.0).fill_width(), icon("chevron-right").size(16.0) ]).align_y(1).spacing(12.0)
+            let b = button_with(line).on_press("go:" + (pg as Str)).class("ghost").fill_width().padding_xy(16.0, 10.0)
+            b.st.ax = 0
+            rows.push(b)
+        ]
+        i = i + 1
+    ]
+    if rows.len() == 0 [
+        rows.push(srow(th.clone(), tr(c.clone(), "Brak wyników", "No results"), "", text("")))
+    ]
+    end column([ text(tr(c.clone(), "Wyniki wyszukiwania", "Search results")).size(24.0).bold(), group(th.clone(), "", rows) ]).spacing(20.0).fill_width()
+]
+
+fun cursor_themes() -> List<Str> [
+    let out: List<Str> = []
+    let dirs = ["/usr/share/icons", home_dir() + "/.icons", home_dir() + "/.local/share/icons"]
+    let i = 0
+    while i < dirs.len() [
+        if fexists(dirs[i].clone()) [
+            let lines = s_split(gui_run("find", [dirs[i].clone(), "-maxdepth", "2", "-type", "d", "-name", "cursors"]), "\n")
+            let k = 0
+            while k < lines.len() [
+                let ln = trim(lines[k].clone())
+                if ln != "" [
+                    let parts = s_split(ln.clone(), "/")
+                    if parts.len() >= 2 [
+                        let nm = parts[parts.len() - 2].clone()
+                        if not list_has(out.clone(), nm.clone()) [
+                            out.push(nm)
+                        ]
+                    ]
+                ]
+                k = k + 1
+            ]
+        ]
+        i = i + 1
+    ]
+    end sort_strs(out)
 ]
 
 fun settings_view(s: SState) -> Element [
     let th = s.th.clone()
-    let items: List<Element> = [ text("HWDE").size(13.0).bold().color(th.p.subtext).padding_4(10.0, 0.0, 8.0, 12.0) ]
+    let items: List<Element> = [ text("HWDE").size(13.0).bold().color(th.p.subtext).padding_4(10.0, 0.0, 8.0, 12.0), text_input(tr(s.c.clone(), "Szukaj ustawień…", "Search settings…"), s.query.clone()).id("q").on_input("q").fill_width() ]
     let i = 0
     while i < page_count() [
         let line = row([ icon(page_icon(i)).size(17.0), text(page_title(s.c.clone(), i)).size(14.0) ]).spacing(12.0).align_y(1)
@@ -433,22 +709,28 @@ fun settings_view(s: SState) -> Element [
         page = page_appearance(s.clone())
     ]
     if s.page == 1 [
-        page = page_panel(s.clone())
+        page = page_wallpaper(s.clone())
     ]
     if s.page == 2 [
-        page = page_windows(s.clone())
+        page = page_panel(s.clone())
     ]
     if s.page == 3 [
-        page = page_input(s.clone())
+        page = page_windows(s.clone())
     ]
     if s.page == 4 [
-        page = page_display(s.clone())
+        page = page_input(s.clone())
     ]
     if s.page == 5 [
-        page = page_notify(s.clone())
+        page = page_display(s.clone())
     ]
     if s.page == 6 [
+        page = page_notify(s.clone())
+    ]
+    if s.page == 7 [
         page = page_apps(s.clone())
+    ]
+    if slen(trim(s.query.clone())) > 0 [
+        page = search_view(s.clone())
     ]
     let body = scrollable(container(page).padding(28.0).fill_width()).fill_all()
     end row([ side, body ]).fill_all()
@@ -488,6 +770,36 @@ fun pad3(n: Int) -> Str [
     end n as Str
 ]
 
+fun panel_preset(c: Conf, id: Str) [
+    if id == "dock" [
+        cset(c, "panel.position", "bottom")
+        cset(c, "panel.floating", "1")
+        cset(c, "panel.height", "46")
+        cset(c, "panel.margin", "8")
+        cset(c, "panel.left", "launcher")
+        cset(c, "panel.center", "tasks")
+        cset(c, "panel.right", "status,clock,power")
+    ]
+    if id == "minimal" [
+        cset(c, "panel.position", "top")
+        cset(c, "panel.floating", "0")
+        cset(c, "panel.height", "30")
+        cset(c, "panel.margin", "0")
+        cset(c, "panel.left", "tasks")
+        cset(c, "panel.center", "")
+        cset(c, "panel.right", "clock,status")
+    ]
+    if id == "classic" [
+        cset(c, "panel.position", "top")
+        cset(c, "panel.floating", "1")
+        cset(c, "panel.height", "38")
+        cset(c, "panel.margin", "6")
+        cset(c, "panel.left", "launcher,tasks")
+        cset(c, "panel.center", "clock")
+        cset(c, "panel.right", "status,power")
+    ]
+]
+
 fun settings_update(s: SState, m: Message, now: Int) -> SState [
     let n = s.clone()
     n.outputs = outputs_update(n.outputs.clone(), m)
@@ -496,6 +808,81 @@ fun settings_update(s: SState, m: Message, now: Int) -> SState [
     if s_starts(id.clone(), "page:") [
         n.page = parse_i(s_sub(id.clone(), 5, slen(id.clone())))
         n.confirm = false
+        n.query = ""
+    ]
+    if s_starts(id.clone(), "go:") [
+        n.page = parse_i(s_sub(id.clone(), 3, slen(id.clone())))
+        n.query = ""
+    ]
+    if id == "q" [
+        n.query = m.text.clone()
+    ]
+    if s_starts(id.clone(), "wp:") [
+        if wall_preset_apply(n.c, s_sub(id.clone(), 3, slen(id.clone()))) [
+            changed = true
+        ]
+    ]
+    if s_starts(id.clone(), "wi:") [
+        let wi = parse_i(s_sub(id.clone(), 3, slen(id.clone())))
+        if wi >= 0 and wi < n.wall_files.len() [
+            cset(n.c, "wallpaper.mode", "image")
+            cset(n.c, "wallpaper.image", n.wall_files[wi].clone())
+            changed = true
+        ]
+    ]
+    if s_starts(id.clone(), "wgp:") [
+        n.wall_page = imax(n.wall_page + parse_i(s_sub(id.clone(), 4, slen(id.clone()))), 0)
+        let maxp = imax((n.wall_files.len() + 7) / 8 - 1, 0)
+        n.wall_page = imin(n.wall_page, maxp)
+    ]
+    if id == "wref" [
+        n.wall_files = wall_list(n.c.clone())
+        n.wall_page = 0
+    ]
+    if id == "wnext" [
+        wall_step(n.c.clone(), "next")
+    ]
+    if id == "wprev" [
+        wall_step(n.c.clone(), "prev")
+    ]
+    if id == "wrand" [
+        wall_step(n.c.clone(), "random")
+    ]
+    if s_starts(id.clone(), "pp:") [
+        panel_preset(n.c, s_sub(id.clone(), 3, slen(id.clone())))
+        changed = true
+    ]
+    if id == "bk" [
+        let dst = conf_backup()
+        n.backups = conf_backups()
+        if dst != "" [
+            n.status = tr(n.c.clone(), "Zapisano kopię: ", "Backup saved: ") + dst
+        ]
+    ]
+    if s_starts(id.clone(), "rb:") [
+        let bi = parse_i(s_sub(id.clone(), 3, slen(id.clone())))
+        if bi >= 0 and bi < n.backups.len() [
+            let txt = gui_read_file(n.backups[bi].clone())
+            if slen(txt.clone()) > 0 [
+                gui_write_file(conf_path(), txt)
+                n.c = conf_load()
+                n.th = hw_theme(n.c.clone())
+                n.pending = now
+                n.status = tr(n.c.clone(), "Przywrócono kopię.", "Backup restored.")
+            ]
+        ]
+    ]
+    if id == "chk" [
+        let hl = hl_path()
+        if hl == "" [
+            n.status = tr(n.c.clone(), "Brak interpretera hl.", "The hl interpreter was not found.")
+        ] else [
+            if hw_status(hl, ["check", conf_path()]) == 0 [
+                n.status = tr(n.c.clone(), "hwde.conf: składnia poprawna.", "hwde.conf: syntax OK.")
+            ] else [
+                n.status = tr(n.c.clone(), "hwde.conf: błąd składni (uruchom: hl check hwde.conf).", "hwde.conf: syntax error (run: hl check hwde.conf).")
+            ]
+        ]
     ]
     if s_starts(id.clone(), "b:") [
         cset_b(n.c, s_sub(id.clone(), 2, slen(id.clone())), m.flag)
@@ -636,7 +1023,7 @@ fun run_settings() [
     app.set_css(hw_css(c.clone(), th.clone()))
     app.set_tick(250)
     let outs: List<OutputInfo> = []
-    let s = SState(c, th, 0, -1, outs, vol_get(), vol_muted(), bright_get(), "", "", "", false, "")
+    let s = SState(c, th, 0, -1, outs, vol_get(), vol_muted(), bright_get(), "", "", "", false, "", "", wall_list(c.clone()), 0, cursor_themes(), conf_backups())
     while app.running() [
         let old_theme = s.th.name.clone()
         let old_key = cget(s.c.clone(), "appearance.accent") + cget(s.c.clone(), "appearance.radius") + cget(s.c.clone(), "appearance.font_scale") + cget(s.c.clone(), "appearance.animations")
@@ -657,4 +1044,26 @@ fun run_settings() [
         labwc_apply(s.c.clone(), true)
     ]
     hw_single_done("settings")
+]
+
+!! pomocnicze (debug/dokumentacja): GUI_BACKEND=headless hwde settings-shot <strona 0-8> <plik.png> [szukaj]
+fun run_settings_shot(page: Int, file: Str, query: Str) [
+    let c = conf_load()
+    let th = hw_theme(c.clone())
+    let app = app_new(tr(c.clone(), "Ustawienia", "Settings"), 920, 900)
+    app.set_theme(th.clone())
+    app.set_css(hw_css(c.clone(), th.clone()))
+    let outs: List<OutputInfo> = []
+    let s = SState(c, th, page, -1, outs, -1, false, -1, "", "", "", false, "", query, wall_list(c.clone()), 0, cursor_themes(), conf_backups())
+    let i = 0
+    while i < 4 [
+        for m in app.frame1(settings_view(s.clone())) [
+            s = settings_update(s.clone(), m, gui_now_ms())
+        ]
+        i = i + 1
+    ]
+    let ids = app.window_ids()
+    if ids.len() > 0 [
+        gui_screenshot(ids[0], file)
+    ]
 ]
