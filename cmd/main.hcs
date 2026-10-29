@@ -2,6 +2,7 @@ get <bit:gui>
 include <sys>
 include <conf>
 include <sysinfo>
+include <wallpaper>
 include <shell>
 include <popups>
 include <lock>
@@ -39,6 +40,15 @@ fun main() [
     if cmd == "settings" [
         run_settings()
     ]
+    if cmd == "settings-shot" [
+        if a.len() > 2 [
+            let q = ""
+            if a.len() > 3 [
+                q = a[3].clone()
+            ]
+            run_settings_shot(parse_i(a[1].clone()), a[2].clone(), q)
+        ]
+    ]
     if cmd == "apply" [
         labwc_apply(conf_load(), true)
     ]
@@ -55,14 +65,39 @@ fun main() [
         ]
     ]
     if cmd == "config" [
-        !! wypisuje aktualna (scalona z domyslnymi) konfiguracje - mozna zapisac do hwde.conf
+        !! wypisuje aktualna (scalona z domyslnymi) konfiguracje jako plik Hacker Langa - mozna zapisac do hwde.conf
         log(conf_text(conf_load()))
     ]
+    if cmd == "wallpaper" [
+        run_wallpaper(a.clone())
+    ]
+    if cmd == "check" [
+        !! sprawdza skladnie hwde.conf interpreterem Hacker Langa
+        let hl = hl_path()
+        if hl == "" [
+            log("brak interpretera hl - uzywam uproszczonego czytnika konfiguracji")
+        ] else [
+            let st = hw_status(hl.clone(), ["check", conf_path()])
+            if st == 0 [
+                log("hwde.conf: OK (" + conf_path() + ")")
+            ] else [
+                log("hwde.conf: BLAD skladni - uruchom: hl check " + conf_path())
+            ]
+        ]
+    ]
+    if cmd == "backup" [
+        let dst = conf_backup()
+        if dst != "" [
+            log("zapisano kopie: " + dst)
+        ] else [
+            log("nie udalo sie zapisac kopii")
+        ]
+    ]
     if cmd == "version" or cmd == "--version" [
-        log("hwde 0.1 (HackerOS Wayland Desktop Environment)")
+        log("hwde 0.2 (HackerOS Wayland Desktop Environment)")
     ]
     if cmd == "help" or cmd == "--help" or cmd == "-h" [
-        log("hwde - HackerOS Wayland Desktop Environment\n\nPOLECENIA\n  shell          panel, tapeta, powiadomienia, blokada po bezczynnosci (uruchamiane przez autostart)\n  launcher       launcher aplikacji (przelacznik)\n  popup quick    szybkie ustawienia      popup calendar   kalendarz\n  power          menu zasilania          lock             ekran blokady\n  osd volume +5 | volume -5 | mute | brightness +5 | brightness -5\n  settings       aplikacja Ustawienia\n  run <rola>     terminal | browser | files | editor | screenshot\n  notify <tytul> [tresc]   wyslij powiadomienie\n  apply          wygeneruj konfiguracje labwc z hwde.conf i przeladuj labwc\n  config         wypisz biezaca konfiguracje\n  autostart      uruchamiane przez labwc: skala ekranu, polkit, autostart, powloka")
+        log("hwde - HackerOS Wayland Desktop Environment\n\nPOLECENIA\n  shell          panel, tapeta, powiadomienia, blokada po bezczynnosci (uruchamiane przez autostart)\n  launcher       launcher aplikacji (przelacznik)\n  popup quick    szybkie ustawienia      popup calendar   kalendarz\n  power          menu zasilania          lock             ekran blokady\n  osd volume +5 | volume -5 | mute | brightness +5 | brightness -5\n  settings       aplikacja Ustawienia\n  run <rola>     terminal | browser | files | editor | screenshot\n  notify <tytul> [tresc]   wyslij powiadomienie\n  apply          wygeneruj konfiguracje labwc z hwde.conf i przeladuj labwc\n  config         wypisz biezaca konfiguracje (plik Hacker Langa)\n  wallpaper ...  tapety: set|color|gradient|preset|folder|slideshow|next|prev|random|list|current\n  check          sprawdz skladnie hwde.conf (hl check)\n  backup         zapisz kopie zapasowa hwde.conf\n  autostart      uruchamiane przez labwc: skala ekranu, polkit, autostart, powloka")
     ]
     if cmd == "run" [
         if a.len() > 1 [
