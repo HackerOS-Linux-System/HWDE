@@ -22,6 +22,14 @@ pub fn hw_mtime(path: String) -> i64 {
     }
 }
 
+pub fn hw_epoch_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+}
+
+pub fn hw_run_dir() -> String {
+    run_dir()
+}
+
 pub fn hw_self() -> String {
     std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "hwde".to_string())
 }
