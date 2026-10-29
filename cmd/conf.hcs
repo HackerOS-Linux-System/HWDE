@@ -54,6 +54,9 @@ fun defaults() -> List<Str> [
         "appearance.font_scale=100",
         "appearance.panel_opacity=94",
         "appearance.animations=1",
+        "appearance.cursor_theme=",
+        "appearance.cursor_size=24",
+        "appearance.gtk_sync=1",
         "panel.position=top",
         "panel.floating=1",
         "panel.height=38",
@@ -70,6 +73,13 @@ fun defaults() -> List<Str> [
         "wallpaper.color2=",
         "wallpaper.angle=160",
         "wallpaper.image=",
+        "wallpaper.image_dark=",
+        "wallpaper.image_light=",
+        "wallpaper.fit=fill",
+        "wallpaper.preset=graphite",
+        "wallpaper.folder=",
+        "wallpaper.interval=15",
+        "wallpaper.order=random",
         "windows.titlebar=icon:iconify,max,close",
         "windows.corner_radius=10",
         "windows.border=1",
@@ -95,6 +105,10 @@ fun defaults() -> List<Str> [
         "notify.dnd=0",
         "notify.timeout=6",
         "notify.max=4",
+        "night.enabled=0",
+        "night.temp=4000",
+        "night.start=20:00",
+        "night.end=07:00",
         "lock.timeout=10",
         "lock.screen_off=15",
         "apps.terminal=",
@@ -107,6 +121,7 @@ fun defaults() -> List<Str> [
         "keys.W-e=exec:hwde run files",
         "keys.W-b=exec:hwde run browser",
         "keys.W-comma=exec:hwde settings",
+        "keys.W-w=exec:hwde wallpaper next",
         "keys.W-l=exec:hwde lock",
         "keys.W-q=action:Close",
         "keys.A-F4=action:Close",
@@ -224,7 +239,8 @@ fun resolve_lang(c: Conf) -> Str [
     end "en"
 ]
 
-fun conf_parse(c: Conf, text: Str) [
+!! ---------------------------------------------------------------- INI (v0.1) - tylko do migracji do Hacker Langa
+fun conf_parse_ini(c: Conf, text: Str) [
     let sec = ""
     let lines = s_split(text, "\n")
     let i = 0
@@ -247,14 +263,22 @@ fun conf_parse(c: Conf, text: Str) [
     ]
 ]
 
-fun conf_load() -> Conf [
-    let c = conf_default()
-    let t = gui_read_file(conf_path())
-    if slen(t.clone()) > 0 [
-        conf_parse(c, t)
+fun conf_is_legacy(text: Str) -> Bool [
+    let lines = s_split(text, "\n")
+    let i = 0
+    while i < lines.len() [
+        let ln = trim(lines[i].clone())
+        if slen(ln.clone()) > 0 and ln.char_at(0) != "#" and ln.char_at(0) != ";" [
+            end ln.char_at(0) == "["
+        ]
+        i = i + 1
     ]
-    c.lang = resolve_lang(c.clone())
-    end c
+    end false
+]
+
+!! ---------------------------------------------------------------- pomocnicze
+fun fexists(p: Str) -> Bool [
+    end gui_file_size(p) >= 0
 ]
 
 fun sec_of(key: Str) -> Str [
@@ -281,42 +305,6 @@ fun list_has(l: List<Str>, v: Str) -> Bool [
     end false
 ]
 
-fun conf_text(c: Conf) -> Str [
-    let out = "# HWDE - konfiguracja. Mozna edytowac recznie; powloka przeladowuje plik sama.\n# Skladnia: [sekcja] i klucz = wartosc. Dodatkowy CSS: custom.css w tym katalogu.\n"
-    let order = defaults()
-    let seen: List<Str> = []
-    let last = ""
-    let i = 0
-    while i < order.len() [
-        let p = split_kv(order[i].clone())
-        let k = p[0].clone()
-        seen.push(k.clone())
-        if sec_of(k.clone()) != last [
-            last = sec_of(k.clone())
-            out = out + "\n[" + last + "]\n"
-        ]
-        out = out + key_of(k.clone()) + " = " + cget(c.clone(), k.clone()) + "\n"
-        i = i + 1
-    ]
-    !! klucze uzytkownika spoza domyslnych (autostart, wlasne skroty, ustawienia ekranow)
-    let keys = c.kv.keys()
-    let extra: List<Str> = []
-    let j = 0
-    while j < keys.len() [
-        if not list_has(seen.clone(), keys[j].clone()) [
-            extra.push(keys[j].clone())
-        ]
-        j = j + 1
-    ]
-    let sorted = sort_strs(extra)
-    let k2 = 0
-    while k2 < sorted.len() [
-        out = out + "\n[" + sec_of(sorted[k2].clone()) + "]\n" + key_of(sorted[k2].clone()) + " = " + cget(c.clone(), sorted[k2].clone()) + "\n"
-        k2 = k2 + 1
-    ]
-    end out
-]
-
 fun sort_strs(l: List<Str>) -> List<Str> [
     let a: List<Str> = []
     let i = 0
@@ -341,9 +329,463 @@ fun sort_strs(l: List<Str>) -> List<Str> [
     end a
 ]
 
+fun dget(d: Dict<Str, Str>, k: Str) -> Str [
+    match d.fetch(k) [
+        Some(v) -> [
+            end v
+        ]
+        None -> [
+            end ""
+        ]
+    ]
+    end ""
+]
+
+!! ============================================================================
+!! HWDE 0.2: hwde.conf jest plikiem Hacker Langa (jak init.lua w Neovim/awesome).
+!! Zmienne `sekcja_klucz` (np. `% panel_height: int = 38`) wykonuje interpreter `hl`,
+!! wiec w konfiguracji mozna uzywac warunkow, ::env, ::set, > komend |> @zmienna itd.
+!! Bez `hl` dziala wbudowany, uproszczony czytnik (same przypisania `% nazwa = wartosc`).
+!! ============================================================================
+fun hl_path() -> Str [
+    if hw_which("hl") [
+        end "hl"
+    ]
+    if hw_which("/usr/bin/hl") [
+        end "/usr/bin/hl"
+    ]
+    end ""
+]
+
+fun known_sections() -> List<Str> [
+    end ["general", "appearance", "panel", "wallpaper", "windows", "input", "display", "notify", "lock", "apps", "keys", "autostart", "night"]
+]
+
+fun name_chars() -> Str [
+    end "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+]
+
+fun name_prefix(rest: Str) -> Str [
+    let n = 0
+    let len = slen(rest.clone())
+    while n < len and s_find(name_chars(), rest.char_at(n)) >= 0 [
+        n = n + 1
+    ]
+    end s_sub(rest.clone(), 0, n)
+]
+
+fun strip_quotes(v: Str) -> Str [
+    let t = trim(v)
+    let n = slen(t.clone())
+    if n >= 2 and s_starts(t.clone(), "\"") and s_ends(t.clone(), "\"") [
+        end s_sub(t.clone(), 1, n - 1)
+    ]
+    end t
+]
+
+!! Lista wpisow "nazwa=wartosc" znalezionych w pliku (statycznie): `% nazwa[: typ] = wartosc` i `::set nazwa wartosc`
+fun hl_scan(text: Str) -> List<Str> [
+    let out: List<Str> = []
+    let lines = s_split(text, "\n")
+    let i = 0
+    while i < lines.len() [
+        let ln = trim(lines[i].clone())
+        let name = ""
+        let val = ""
+        if s_starts(ln.clone(), "::set ") [
+            let rest = trim(s_sub(ln.clone(), 6, slen(ln.clone())))
+            name = name_prefix(rest.clone())
+            val = strip_quotes(s_sub(rest.clone(), slen(name.clone()), slen(rest.clone())))
+        ]
+        if s_starts(ln.clone(), "%") [
+            let rest2 = trim(s_sub(ln.clone(), 1, slen(ln.clone())))
+            name = name_prefix(rest2.clone())
+            let after = trim(s_sub(rest2.clone(), slen(name.clone()), slen(rest2.clone())))
+            let eq = s_find(after.clone(), "=")
+            if eq >= 0 [
+                val = strip_quotes(s_sub(after.clone(), eq + 1, slen(after.clone())))
+            ] else [
+                name = ""
+            ]
+        ]
+        if name != "" [
+            out.push(name + "=" + val)
+        ]
+        i = i + 1
+    ]
+    end out
+]
+
+fun hl_names(scan: List<Str>) -> List<Str> [
+    let names: List<Str> = []
+    let i = 0
+    while i < scan.len() [
+        let p = split_kv(scan[i].clone())
+        if p.len() == 2 and not list_has(names.clone(), p[0].clone()) [
+            names.push(p[0].clone())
+        ]
+        i = i + 1
+    ]
+    end names
+]
+
+!! Wykonuje plik przez `hl` i zwraca wartosci ustawionych zmiennych (nazwa -> wartosc).
+!! Kazda zmienna jest wypisywana jako trzy linie: HWDE|nazwa, wynik ::type, HWDE=wartosc
+!! (typ "nil" = zmienna nie zostala ustawiona, np. w nieuzytej galezi warunku).
+fun hl_run(path: Str, names: List<Str>) -> Dict<Str, Str> [
+    let out: Dict<Str, Str> = dict()
+    let hl = hl_path()
+    if hl == "" or names.len() == 0 [
+        end out
+    ]
+    let code = "using <gen 2>\n<< " + path + "\n"
+    let i = 0
+    while i < names.len() [
+        code = code + "~> HWDE|" + names[i] + "\n::type " + names[i] + "\n~> HWDE=@" + names[i] + "\n"
+        i = i + 1
+    ]
+    let txt = gui_run(hl, ["-c", code])
+    let lines = s_split(txt, "\n")
+    let cur = ""
+    let st = ""
+    let mode = 0
+    let j = 0
+    while j < lines.len() [
+        let ln = lines[j].clone()
+        if s_starts(ln.clone(), "HWDE|") [
+            cur = s_sub(ln.clone(), 5, slen(ln.clone()))
+            mode = 1
+        ] else [
+            if s_starts(ln.clone(), "HWDE=") [
+                if mode == 2 and cur != "" and st != "nil" [
+                    out.insert(cur.clone(), s_sub(ln.clone(), 5, slen(ln.clone())))
+                ]
+                mode = 0
+            ] else [
+                if mode == 1 [
+                    st = trim(ln.clone())
+                    mode = 2
+                ]
+            ]
+        ]
+        j = j + 1
+    ]
+    end out
+]
+
+fun hl_eval(path: Str, text: Str) -> Dict<Str, Str> [
+    let scan = hl_scan(text.clone())
+    let vals = hl_run(path, hl_names(scan.clone()))
+    if vals.keys().len() > 0 [
+        end vals
+    ]
+    !! brak hl (albo blad w pliku): uproszczony odczyt statyczny
+    let out: Dict<Str, Str> = dict()
+    let i = 0
+    while i < scan.len() [
+        let p = split_kv(scan[i].clone())
+        if p.len() == 2 [
+            out.insert(p[0].clone(), p[1].clone())
+        ]
+        i = i + 1
+    ]
+    end out
+]
+
+!! nazwa zmiennej HL <-> klucz konfiguracji:  panel_height <-> panel.height,  keys_W_Return <-> keys.W-Return
+!! (w sekcji keys: "_" w nazwie zmiennej = "-" w nazwie klawisza, "__" = "_", np. keys_KP__Enter)
+fun var_to_key(name: Str) -> Str [
+    let i = s_find(name.clone(), "_")
+    if i <= 0 [
+        end ""
+    ]
+    let sec = s_sub(name.clone(), 0, i)
+    if not list_has(known_sections(), sec.clone()) [
+        end ""
+    ]
+    let rest = s_sub(name.clone(), i + 1, slen(name.clone()))
+    if sec == "keys" [
+        rest = s_replace(rest.clone(), "__", "@")
+        rest = s_replace(rest.clone(), "_", "-")
+        rest = s_replace(rest.clone(), "@", "_")
+    ]
+    end sec + "." + rest
+]
+
+fun key_to_var(key: Str) -> Str [
+    let sec = sec_of(key.clone())
+    let rest = key_of(key.clone())
+    if sec == "keys" [
+        rest = s_replace(rest.clone(), "_", "@")
+        rest = s_replace(rest.clone(), "-", "_")
+        rest = s_replace(rest.clone(), "@", "__")
+    ]
+    end sec + "_" + rest
+]
+
+fun conf_apply_vars(c: Conf, vals: Dict<Str, Str>) [
+    let names = vals.keys()
+    let i = 0
+    while i < names.len() [
+        let n = names[i].clone()
+        let v = dget(vals.clone(), n.clone())
+        if n == "display_scale" [
+            !! "eDP-1:1.5 HDMI-A-1:1.25"
+            let words = s_split(v.clone(), " ")
+            let w = 0
+            while w < words.len() [
+                let k = s_find(words[w].clone(), ":")
+                if k > 0 [
+                    c.kv.insert("display.scale." + s_sub(words[w].clone(), 0, k), s_sub(words[w].clone(), k + 1, slen(words[w].clone())))
+                ]
+                w = w + 1
+            ]
+        ] else [
+            if n == "wallpaper_outputs" [
+                !! "eDP-1=/a.png;HDMI-A-1=/b.png"
+                let items = s_split(v.clone(), ";")
+                let t = 0
+                while t < items.len() [
+                    let k2 = s_find(items[t].clone(), "=")
+                    if k2 > 0 [
+                        c.kv.insert("wallpaper.out." + s_sub(items[t].clone(), 0, k2), s_sub(items[t].clone(), k2 + 1, slen(items[t].clone())))
+                    ]
+                    t = t + 1
+                ]
+            ] else [
+                let key = var_to_key(n.clone())
+                if key != "" [
+                    c.kv.insert(key, v.clone())
+                ]
+            ]
+        ]
+        i = i + 1
+    ]
+]
+
+fun conf_load() -> Conf [
+    let c = conf_default()
+    let t = gui_read_file(conf_path())
+    if conf_is_legacy(t.clone()) [
+        !! hwde.conf w starym formacie INI (v0.1): zamien na Hacker Lang, zostaw kopie .ini.bak
+        conf_parse_ini(c, t.clone())
+        gui_write_file(conf_path() + ".ini.bak", t.clone())
+        conf_save(c.clone())
+        c.lang = resolve_lang(c.clone())
+        end c
+    ]
+    if slen(t.clone()) > 0 [
+        conf_apply_vars(c, hl_eval(conf_path(), t.clone()))
+    ]
+    c.lang = resolve_lang(c.clone())
+    end c
+]
+
+!! ---------------------------------------------------------------- zapis (blok zarzadzany przez Ustawienia)
+fun mark_a() -> Str [
+    end ";; >>> hwde-settings >>>"
+]
+
+fun mark_b() -> Str [
+    end ";; <<< hwde-settings <<<"
+]
+
+fun is_int_str(v: Str) -> Bool [
+    let n = slen(v.clone())
+    if n == 0 or n > 9 [
+        end false
+    ]
+    let i = 0
+    if v.char_at(0) == "-" [
+        i = 1
+    ]
+    if i >= n [
+        end false
+    ]
+    while i < n [
+        if s_find("0123456789", v.char_at(i)) < 0 [
+            end false
+        ]
+        i = i + 1
+    ]
+    end true
+]
+
+fun hl_assign(name: Str, v: Str) -> Str [
+    if is_int_str(v.clone()) [
+        end "% " + name + ": int = " + v + "\n"
+    ]
+    let q = s_replace(v.clone(), "\"", "'")
+    end "% " + name + ": str = \"" + q + "\"\n"
+]
+
+fun conf_block(c: Conf) -> Str [
+    let out = mark_a() + "  (zarzadzane przez Ustawienia - tutaj nie edytuj; swoje zmiany pisz pod blokiem)\n"
+    let order = defaults()
+    let seen: List<Str> = []
+    let last = ""
+    let i = 0
+    while i < order.len() [
+        let p = split_kv(order[i].clone())
+        let k = p[0].clone()
+        seen.push(k.clone())
+        if sec_of(k.clone()) != last [
+            last = sec_of(k.clone())
+            out = out + "\n;; [" + last + "]\n"
+        ]
+        out = out + hl_assign(key_to_var(k.clone()), cget(c.clone(), k.clone()))
+        i = i + 1
+    ]
+    let keys = c.kv.keys()
+    let extra: List<Str> = []
+    let scales: List<Str> = []
+    let walls: List<Str> = []
+    let j = 0
+    while j < keys.len() [
+        let k2 = keys[j].clone()
+        if not list_has(seen.clone(), k2.clone()) [
+            if s_starts(k2.clone(), "display.scale.") [
+                if cget(c.clone(), k2.clone()) != "" [
+                    scales.push(s_sub(k2.clone(), 14, slen(k2.clone())) + ":" + cget(c.clone(), k2.clone()))
+                ]
+            ] else [
+                if s_starts(k2.clone(), "wallpaper.out.") [
+                    if cget(c.clone(), k2.clone()) != "" [
+                        walls.push(s_sub(k2.clone(), 14, slen(k2.clone())) + "=" + cget(c.clone(), k2.clone()))
+                    ]
+                ] else [
+                    if list_has(known_sections(), sec_of(k2.clone())) and key_of(k2.clone()) != "" [
+                        extra.push(k2.clone())
+                    ]
+                ]
+            ]
+        ]
+        j = j + 1
+    ]
+    let sorted = sort_strs(extra)
+    let lastx = ""
+    let x = 0
+    while x < sorted.len() [
+        if sec_of(sorted[x].clone()) != lastx [
+            lastx = sec_of(sorted[x].clone())
+            out = out + "\n;; [" + lastx + "] (dodatkowe)\n"
+        ]
+        out = out + hl_assign(key_to_var(sorted[x].clone()), cget(c.clone(), sorted[x].clone()))
+        x = x + 1
+    ]
+    if scales.len() > 0 [
+        out = out + "\n;; skala monitorow: NAZWA:SKALA oddzielone spacjami\n"
+        out = out + hl_assign("display_scale", join_strs(sort_strs(scales), " "))
+    ]
+    if walls.len() > 0 [
+        out = out + "\n;; tapeta per monitor: NAZWA=PLIK oddzielone srednikami\n"
+        out = out + hl_assign("wallpaper_outputs", join_strs(sort_strs(walls), ";"))
+    ]
+    end out + "\n" + mark_b()
+]
+
+fun join_strs(l: List<Str>, sep: Str) -> Str [
+    let out = ""
+    let i = 0
+    while i < l.len() [
+        if i > 0 [
+            out = out + sep
+        ]
+        out = out + l[i]
+        i = i + 1
+    ]
+    end out
+]
+
+fun conf_header() -> Str [
+    let h = "#!/usr/bin/hl\nusing <gen 2>\n\n"
+    h = h + ";; ===========================================================================\n"
+    h = h + ";; HWDE 0.2 - konfiguracja w Hacker Langu  (~/.config/hwde/hwde.conf)\n"
+    h = h + ";;\n"
+    h = h + ";; Ten plik wykonuje interpreter `hl`. Ustawienia to zmienne `sekcja_klucz`:\n"
+    h = h + ";;     % panel_height: int = 38\n"
+    h = h + ";;     % wallpaper_mode: str = \"slideshow\"\n"
+    h = h + ";; Mozna uzywac calego jezyka: warunki, ::env, ::set, komend z |> @zmienna, funkcji.\n"
+    h = h + ";; Aplikacja Ustawienia zapisuje wylacznie blok miedzy znacznikami hwde-settings.\n"
+    h = h + ";; Wszystko, co napiszesz POD blokiem, nadpisuje blok i nigdy nie jest ruszane.\n"
+    h = h + ";; Opis kluczy: docs/CONFIG.md, przyklady: examples/hwde.conf\n"
+    h = h + ";; ===========================================================================\n\n"
+    end h
+]
+
+fun conf_footer() -> Str [
+    end "\n\n;; ---- Twoje ustawienia (nadpisuja blok powyzej) --------------------------------\n;; np. rozne ustawienia zaleznie od komputera:\n;;   > hostname |> @host\n;;   ? switch @host\n;;   | laptop\n;;       % panel_height: int = 44\n;;   done\n"
+]
+
+!! pelny tekst pliku: podmienia blok w istniejacym tekscie albo tworzy nowy plik z naglowkiem
+fun conf_file_text(c: Conf, existing: Str) -> Str [
+    let blk = conf_block(c.clone())
+    if conf_is_legacy(existing.clone()) [
+        end conf_header() + blk + conf_footer()
+    ]
+    let a = s_find(existing.clone(), mark_a())
+    let b = s_find(existing.clone(), mark_b())
+    if a >= 0 and b > a [
+        let before = s_sub(existing.clone(), 0, a)
+        let after = s_sub(existing.clone(), b + slen(mark_b()), slen(existing.clone()))
+        end before + blk + after
+    ]
+    if slen(trim(existing.clone())) > 0 [
+        end existing + "\n\n" + blk + "\n"
+    ]
+    end conf_header() + blk + conf_footer()
+]
+
+fun conf_text(c: Conf) -> Str [
+    end conf_file_text(c, "")
+]
+
 fun conf_save(c: Conf) -> Bool [
     gui_run("mkdir", ["-p", conf_dir()])
-    end gui_write_file(conf_path(), conf_text(c.clone())) == 0
+    let old = gui_read_file(conf_path())
+    let neu = conf_file_text(c.clone(), old.clone())
+    if neu == old [
+        end true
+    ]
+    end gui_write_file(conf_path(), neu) == 0
+]
+
+fun conf_backup_dir() -> Str [
+    end conf_dir() + "/backups"
+]
+
+!! kopia zapasowa hwde.conf; zwraca sciezke kopii albo ""
+fun conf_backup() -> Str [
+    let k = clock_now()
+    let name = (k.year as Str) + pad2(k.mon + 1) + pad2(k.day) + "-" + pad2(k.h) + pad2(k.m) + pad2(k.s)
+    let dst = conf_backup_dir() + "/hwde-" + name + ".conf"
+    gui_run("mkdir", ["-p", conf_backup_dir()])
+    if gui_write_file(dst.clone(), gui_read_file(conf_path())) == 0 [
+        end dst
+    ]
+    end ""
+]
+
+fun conf_backups() -> List<Str> [
+    let out: List<Str> = []
+    let txt = gui_run("ls", ["-1", conf_backup_dir()])
+    let lines = s_split(txt, "\n")
+    let i = 0
+    while i < lines.len() [
+        let ln = trim(lines[i].clone())
+        if s_ends(ln.clone(), ".conf") [
+            out.push(conf_backup_dir() + "/" + ln)
+        ]
+        i = i + 1
+    ]
+    let s = sort_strs(out)
+    let r: List<Str> = []
+    let k = s.len() - 1
+    while k >= 0 and r.len() < 6 [
+        r.push(s[k].clone())
+        k = k - 1
+    ]
+    end r
 ]
 
 !! ---------------------------------------------------------------- tlumaczenia: tr(c, "po polsku", "in English")
