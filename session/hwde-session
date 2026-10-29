@@ -19,7 +19,7 @@ using <gen 2>
 done
 > export XCURSOR_SIZE=@cursor_size
 
-;; Konfiguracja labwc generowana z ~/.config/hwde/hwde.conf
+;; Konfiguracja labwc generowana z ~/.config/hwde/hwde.conf (plik Hacker Langa; stary INI migruje sie sam)
 > hwde apply >/dev/null 2>&1
 
 ;; W sesji bez szyny D-Bus uruchom własną
