@@ -1,7 +1,7 @@
 # HWDE — HackerOS Wayland Desktop Environment
 
 Lekkie, nowoczesne i w pełni dostosowywalne środowisko graficzne dla **labwc**, napisane w całości w
-**HackerScript** z biblioteką **gui** (pakiety zarządzane przez **bit**). Nazwa pochodzi z HackerOS, ale HWDE jest
+**HackerScript** z biblioteką **gui** (pakiety zarządzane przez **bit**), skrojone pod **HackerOS**: konfiguracja `hwde.conf` to skrypt **Hacker Langa**. Nazwa pochodzi z HackerOS, ale HWDE jest
 **do codziennego użytku dla każdego** — zwykły pulpit, bez „hakerskich” akcentów.
 
 * **Kompozytor:** labwc (okna, dekoracje, skróty, wejście). HWDE dokłada **powłokę**: panel, launcher, powiadomienia,
@@ -9,7 +9,7 @@ Lekkie, nowoczesne i w pełni dostosowywalne środowisko graficzne dla **labwc**
 * **Wbudowana jest tylko jedna aplikacja: Ustawienia.** Wszystko inne to Twoje programy.
 * **Domyślny motyw:** szaro-czarny (ciemny) i biało-jasnoszary (jasny), z neutralnym akcentem; akcent można zmienić.
 * **Lekko:** jedna binarka ~3 MB, ~14 MB RAM i ~0,2 % CPU w bezczynności (pomiar: powłoka na labwc headless).
-* **Dostosowywalne:** jeden plik `hwde.conf`, własny `custom.css`, moduły panelu, skróty, autostart, wstawki `rc.xml`.
+* **Dostosowywalne:** jeden plik `hwde.conf` (Hacker Lang — z warunkami i logiką), własny `custom.css`, moduły panelu, skróty, autostart, wstawki `rc.xml`.
 
 ## Co jest w środku
 
@@ -22,7 +22,9 @@ Lekkie, nowoczesne i w pełni dostosowywalne środowisko graficzne dla **labwc**
 | `hwde power` | blokada / uśpienie / wylogowanie / restart / wyłączenie (klawisze L S O R P) |
 | `hwde lock` | ekran blokady (`ext-session-lock`, hasło sprawdza `unix_chkpwd`) |
 | `hwde osd volume +5` … | OSD głośności/jasności (pod klawisze multimedialne) |
-| `hwde settings` | aplikacja Ustawienia (8 stron) |
+| `hwde settings` | aplikacja Ustawienia (9 stron: wygląd, tapety, panel, okna, wejście, ekran, powiadomienia, skróty, system) + wyszukiwarka |
+| `hwde wallpaper …` | tapety: `set`, `preset`, `folder`, `slideshow`, `next`/`prev`/`random`… ([docs/WALLPAPERS.md](docs/WALLPAPERS.md)) |
+| `hwde check` / `hwde backup` | sprawdzenie składni `hwde.conf` / kopia zapasowa |
 | `hwde apply` | generuje konfigurację labwc z `hwde.conf` i przeładowuje labwc |
 | `hwde notify "Tytuł" "Treść"` | wysyła powiadomienie |
 | `hwde run terminal\|browser\|files\|editor\|screenshot` | uruchamia aplikację wg konfiguracji lub autodetekcji |
@@ -33,19 +35,19 @@ Resztę działającą ciągle (panel, powiadomienia) robi jeden proces `hwde she
 ## Wymagania
 
 * **labwc** ≥ 0.7 (przetestowane na 0.7.1), Wayland z `wlr-layer-shell` i `ext-session-lock`
+* **Hacker Lang (`hl`)** — wykonuje `hwde.conf` (w HackerOS jest zawsze; bez niego działa uproszczony czytnik)
 * Do budowania: **HackerScript 0.5** (`hackerc`) + **Rust ≥ 1.86**; opcjonalnie **bit**
 * Opcjonalnie (brak = dana funkcja po prostu znika): `wpctl` lub `pactl` (dźwięk), `brightnessctl`, `nmcli`,
-  `bluetoothctl`/`rfkill`, `swaybg` (tapeta-obraz), `wlr-randr` (skala ekranu), `wlopm` (wygaszanie ekranu),
+  `bluetoothctl`/`rfkill`, `swaybg` (tapeta-obraz i pokaz slajdów), `wlsunset` (nocne światło), `wlr-randr` (skala ekranu), `wlopm` (wygaszanie ekranu),
   `grim` + `slurp` (zrzuty), agent polkit, `xdg-desktop-portal-wlr`, `libxkbcommon` (układy klawiatury w aplikacjach gui)
 * Blokada ekranu wymaga `unix_chkpwd` (pakiet z PAM: `pam`/`libpam-modules`) — jest w każdej typowej dystrybucji
 
 ## Budowanie i instalacja
 
 ```sh
-scripts/build.sh                 # bit build, a bez bita: hackerc + cargo; wynik: ./hwde
-sudo scripts/install.sh          # /usr/local + sesja "HWDE" w /usr/share/wayland-sessions
-# albo tylko dla siebie:
-scripts/install.sh --user
+bit build --release              # binarka ./hwde (hackerc 0.5 + gui przez bit)
+hl run data/scripts/install.hl   # HackerOS: pobiera binarkę z wydania v0.2 i pliki z GitHuba, instaluje w /usr
+hl run data/scripts/remove.hl    # usuwanie (HWDE_PURGE=1 usuwa też ~/.config/hwde)
 ```
 
 Wybierz sesję **HWDE** w menedżerze logowania albo z TTY uruchom `hwde-session`.
@@ -57,13 +59,13 @@ klawisze Esc i strzałki ↑/↓ są przekazywane aplikacji także wtedy, gdy fo
 
 ## Konfiguracja w skrócie
 
-Plik: `~/.config/hwde/hwde.conf` (INI). Aplikacja **Ustawienia** edytuje go na żywo — powłoka przeładowuje się sama,
-a labwc dostaje świeże `rc.xml`/`themerc-override`. Pełny opis kluczy: [docs/CONFIG.md](docs/CONFIG.md),
+Plik: `~/.config/hwde/hwde.conf` (Hacker Lang, np. `% panel_height: int = 40`). Aplikacja **Ustawienia** zapisuje własny blok pliku (Twój kod pod blokiem zostaje) — powłoka przeładowuje się sama,
+a labwc dostaje świeże `rc.xml`/`themerc-override`. Pełny opis kluczy i składni: [docs/CONFIG.md](docs/CONFIG.md),
 sztuczki (CSS, moduły panelu, skróty): [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md), budowa: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 Domyślne skróty: `Super+Enter` terminal · `Super+D`/`Super+Spacja` launcher · `Super+E` pliki · `Super+B` przeglądarka ·
 `Super+,` ustawienia · `Super+L` blokada · `Super+Q`/`Alt+F4` zamknij · `Super+F` pełny ekran · `Super+↑/↓/←/→` okno ·
-`Alt+Tab` przełączanie · `Super+1…4` pulpity · `Ctrl+Alt+Del` zasilanie · `PrtSc` zrzut · klawisze głośności/jasności.
+`Alt+Tab` przełączanie · `Super+W` następna tapeta · `Super+1…4` pulpity · `Ctrl+Alt+Del` zasilanie · `PrtSc` zrzut · klawisze głośności/jasności.
 
 ## Co przetestowano
 
