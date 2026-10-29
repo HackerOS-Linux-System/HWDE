@@ -1,1 +1,139 @@
+#!/usr/bin/hl
+using <gen 2>
 
+;; ============================================================================
+;; HWDE 0.2 - instalator (Hacker Lang)
+;;
+;; Pobiera z GitHuba (HackerOS-Linux-System/HWDE) binarke `hwde` z wydania v0.2
+;; oraz pliki sesji, motyw labwc, przyklady i dokumentacje, po czym instaluje je
+;; w systemie. Wymaga uprawnien administratora (sudo).
+;;
+;;   hl run install.hl            instalacja / aktualizacja
+;;   hl exec hwde-remove          (albo: hl run /usr/share/hwde/scripts/remove.hl)
+;;
+;; Zmienne srodowiskowe (opcjonalne, glownie do testow):
+;;   HWDE_RAW      adres z plikami repozytorium (domyslnie raw.githubusercontent.com .../main)
+;;   HWDE_BIN      adres binarki (domyslnie releases/download/v0.2/hwde)
+;;   HWDE_ROOT     katalog docelowy zamiast / (np. do budowy pakietu)
+;;   HWDE_NO_DEPS  =1 pomija sprawdzanie/instalacje zaleznosci
+;; ============================================================================
+
+// curl
+
+>> printf '%s' "${HWDE_RAW:-https://raw.githubusercontent.com/HackerOS-Linux-System/HWDE/main}" |> @raw
+>> printf '%s' "${HWDE_BIN:-https://github.com/HackerOS-Linux-System/HWDE/releases/download/v0.2/hwde}" |> @bin
+>> printf '%s' "${HWDE_ROOT:-}" |> @root
+>> printf '%s' "${HWDE_NO_DEPS:-0}" |> @nodeps
+> mktemp -d |> @tmp
+% version: str = 0.2
+
+;; ---------------------------------------------------------------- funkcje
+;; pobierz @_url do @tmp/@_name
+: fetch def
+    >> curl -fsSL "@_url" -o "@tmp/@_name"
+    ? err
+        ::red   [blad] nie udalo sie pobrac: @_url
+        >> rm -rf "@tmp"
+        > exit 1
+    done
+done
+
+;; pobierz plik z repozytorium (@_path) i zainstaluj jako @_dst z trybem @_mode
+: put def
+    % _url = @raw/@_path
+    % _name = file
+    -- fetch
+    ^>> install -D -m @_mode "@tmp/file" "@root/@_dst"
+    ::green   + /@_dst
+done
+
+;; ---------------------------------------------------------------- start
+::nl
+::bold HWDE @version - instalacja
+::hr 50
+
+::which labwc
+? err
+    ::yellow   ! brak kompozytora labwc
+    ? switch @nodeps
+    | 1
+        ::yellow   (pomijam instalacje zaleznosci: HWDE_NO_DEPS=1)
+    | *
+        ::cyan   instaluje labwc (apt)...
+        ^> apt-get install -y labwc
+    done
+done
+
+;; opcjonalne programy - bez nich dana funkcja po prostu znika
+@ _tool in swaybg wlsunset wlr-randr brightnessctl grim slurp wlopm
+    ::which @_tool
+    ? err
+        ::yellow   ~ opcjonalnie: @_tool
+    done
+done
+
+::nl
+::bold Pobieram binarke hwde...
+% _url = @bin
+% _name = hwde
+-- fetch
+^>> install -D -m 755 "@tmp/hwde" "@root/usr/bin/hwde"
+::green   + /usr/bin/hwde
+
+::nl
+::bold Pliki sesji, motyw i dane...
+% _mode = 755
+% _path = session/hwde-session
+% _dst = usr/bin/hwde-session
+-- put
+
+% _mode = 644
+% _path = session/hwde.desktop
+% _dst = usr/share/wayland-sessions/hwde.desktop
+-- put
+
+% _path = session/hwde-settings.desktop
+% _dst = usr/share/applications/hwde-settings.desktop
+-- put
+
+% _path = data/themes/HWDE/openbox-3/themerc
+% _dst = usr/share/themes/HWDE/openbox-3/themerc
+-- put
+
+% _path = examples/hwde.conf
+% _dst = usr/share/hwde/examples/hwde.conf
+-- put
+
+% _path = examples/custom.css
+% _dst = usr/share/hwde/examples/custom.css
+-- put
+
+% _path = examples/rc-extra.xml
+% _dst = usr/share/hwde/examples/rc-extra.xml
+-- put
+
+% _path = data/scripts/remove.hl
+% _dst = usr/share/hwde/scripts/remove.hl
+-- put
+
+% _path = LICENSE
+% _dst = usr/share/licenses/hwde/LICENSE
+-- put
+
+::nl
+::bold Dokumentacja...
+@ _doc in README.md docs/CONFIG.md docs/CUSTOMIZATION.md docs/ARCHITECTURE.md docs/WALLPAPERS.md CHANGELOG.md
+    >> basename "@_doc" |> @_base
+    % _path = @_doc
+    ::set _dst usr/share/doc/hwde/@_base
+    -- put
+done
+
+>> rm -rf "@tmp"
+
+::nl
+::hr 50
+::green HWDE @version zainstalowane.
+~> Wybierz sesje "HWDE" w menedzerze logowania albo uruchom z TTY: hwde-session
+~> Konfiguracja (Hacker Lang): ~/.config/hwde/hwde.conf  |  przyklad: /usr/share/hwde/examples/hwde.conf
+~> Ustawienia: hwde settings  |  Usuwanie: hl run /usr/share/hwde/scripts/remove.hl
