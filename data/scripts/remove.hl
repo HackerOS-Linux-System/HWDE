@@ -1,1 +1,49 @@
+#!/usr/bin/hl
+using <gen 2>
 
+;; ============================================================================
+;; HWDE 0.2 - deinstalator (Hacker Lang)
+;;
+;; Usuwa pliki zainstalowane przez install.hl. Konfiguracja uzytkownika
+;; (~/.config/hwde) zostaje, chyba ze ustawisz HWDE_PURGE=1.
+;;
+;;   hl run /usr/share/hwde/scripts/remove.hl
+;;   HWDE_PURGE=1 hl run /usr/share/hwde/scripts/remove.hl
+;;
+;; Zmienne srodowiskowe: HWDE_ROOT (katalog zamiast /), HWDE_PURGE (=1: usun tez ~/.config/hwde)
+;; ============================================================================
+
+>> printf '%s' "${HWDE_ROOT:-}" |> @root
+>> printf '%s' "${HWDE_PURGE:-0}" |> @purge
+
+::nl
+::bold HWDE - usuwanie
+::hr 50
+
+;; nie usuwaj binarki spod dzialajacej sesji
+> pgrep -x hwde
+? ok
+    ::yellow   ! proces hwde dziala - wyloguj sie z sesji HWDE przed usunieciem
+done
+
+@ _f in usr/bin/hwde usr/bin/hwde-session usr/share/wayland-sessions/hwde.desktop usr/share/applications/hwde-settings.desktop
+    ^>> rm -f "@root/@_f"
+    ::yellow   - /@_f
+done
+
+@ _d in usr/share/themes/HWDE usr/share/hwde usr/share/doc/hwde usr/share/licenses/hwde
+    ^>> rm -rf "@root/@_d"
+    ::yellow   - /@_d
+done
+
+? switch @purge
+| 1
+    ::env HOME |> @home
+    >> rm -rf "@home/.config/hwde"
+    ::yellow   - @home/.config/hwde
+| *
+    ~> Konfiguracja uzytkownika (~/.config/hwde) zostala. Usun ja recznie albo uruchom z HWDE_PURGE=1.
+done
+
+::nl
+::green HWDE usuniete.
