@@ -2,6 +2,7 @@ get <bit:gui>
 include <sys>
 include <conf>
 include <sysinfo>
+include <wallpaper>
 
 !! ============================================================================
 !! hwde shell - panel, tapeta, powiadomienia (demon org.freedesktop.Notifications),
@@ -33,7 +34,8 @@ struct Shell [
     notifs: List<Notif>,
     stamp: Int,
     ticks: Int,
-    idle_lock: Bool
+    idle_lock: Bool,
+    wimg: Bool
 ]
 
 struct Win [
@@ -48,7 +50,7 @@ fun shell_new() -> Shell [
     let t: List<TopLevel> = []
     let o: List<OutputInfo> = []
     let n: List<Notif> = []
-    end Shell(c, th, t, o, clock_now(), vol_get(), vol_muted(), net_get(), battery_pct(), battery_charging_now(), n, conf_mtime_sum(), 0, false)
+    end Shell(c, th, t, o, clock_now(), vol_get(), vol_muted(), net_get(), battery_pct(), battery_charging_now(), n, conf_mtime_sum(), 0, false, false)
 ]
 
 !! ---------------------------------------------------------------- moduly panelu
@@ -205,54 +207,6 @@ fun panel_opts(c: Conf, out: Str) -> Str [
         o = o + ";output=" + out
     ]
     end o
-]
-
-!! ---------------------------------------------------------------- tapeta
-fun wall_colors(c: Conf, th: Theme) -> List<Int> [
-    let a = cget(c.clone(), "wallpaper.color1")
-    let b = cget(c.clone(), "wallpaper.color2")
-    let out: List<Int> = []
-    if a == "" [
-        if th.dark [
-            a = "#2a2a2f"
-        ] else [
-            a = "#f4f4f6"
-        ]
-    ]
-    if b == "" [
-        if th.dark [
-            b = "#0a0a0b"
-        ] else [
-            b = "#cfcfd6"
-        ]
-    ]
-    out.push(parse_color(a))
-    out.push(parse_color(b))
-    end out
-]
-
-fun wall_view(c: Conf, th: Theme) -> Element [
-    let cols = wall_colors(c.clone(), th.clone())
-    let e = container(space().fill_all()).fill_all()
-    if cget(c.clone(), "wallpaper.mode") == "color" [
-        end e.background(cols[0])
-    ]
-    end e.gradient(cols[0], cols[1], cget_f(c.clone(), "wallpaper.angle"))
-]
-
-fun wall_is_image(c: Conf) -> Bool [
-    end cget(c.clone(), "wallpaper.mode") == "image" and cget(c.clone(), "wallpaper.image") != "" and hw_which("swaybg") and path_exists(cget(c.clone(), "wallpaper.image"))
-]
-
-fun wall_apply_image(c: Conf) [
-    hw_status("pkill", ["-x", "swaybg"])
-    if wall_is_image(c.clone()) [
-        let col = cget(c.clone(), "wallpaper.color1")
-        if col == "" [
-            col = "#000000"
-        ]
-        gui_spawn("swaybg", ["-i", cget(c.clone(), "wallpaper.image"), "-m", "fill", "-c", col])
-    ]
 ]
 
 !! ---------------------------------------------------------------- powiadomienia
@@ -427,7 +381,7 @@ fun shell_update(s: Shell, m: Message) -> Shell [
 
 !! ---------------------------------------------------------------- petla glowna
 fun geom_key(s: Shell) -> Str [
-    let k = panel_opts(s.c.clone(), "") + "|" + cget(s.c.clone(), "wallpaper.mode") + "|" + cget(s.c.clone(), "wallpaper.image")
+    let k = panel_opts(s.c.clone(), "") + "|" + cget(s.c.clone(), "wallpaper.mode") + "|" + b01(s.wimg)
     let i = 0
     while i < s.outputs.len() [
         k = k + "|" + s.outputs[i].name
@@ -482,6 +436,9 @@ fun run_shell() [
     let gkey = ""
     let toast_win = -1
     let toast_n = 0
+    s.wimg = wall_is_image(s.c.clone())
+    let wsig = wall_sig(s.c.clone())
+    let wchk = gui_now_ms()
     wall_apply_image(s.c.clone())
     while app.running() [
         !! przeladowanie konfiguracji
@@ -493,7 +450,23 @@ fun run_shell() [
             s.stamp = stamp
             app.set_theme(s.th.clone())
             app.set_css(hw_css(nc.clone(), s.th.clone()))
-            wall_apply_image(nc.clone())
+        ]
+        !! raz na sekunde: motyw "auto" (dzien/noc), pokaz slajdow i zmiana tapety
+        let tnow = gui_now_ms()
+        if tnow - wchk >= 1000 [
+            wchk = tnow
+            if is_dark(s.c.clone()) != s.th.dark [
+                s.th = hw_theme(s.c.clone())
+                app.set_theme(s.th.clone())
+                app.set_css(hw_css(s.c.clone(), s.th.clone()))
+            ]
+            wall_tick(s.c.clone())
+            let nsig = wall_sig(s.c.clone())
+            if nsig != wsig [
+                wsig = nsig
+                s.wimg = wall_is_image(s.c.clone())
+                wall_apply_image(s.c.clone())
+            ]
         ]
         !! okna paneli i tapet - przy zmianie geometrii/monitorow otwieramy od nowa
         let key = geom_key(s.clone())
@@ -509,7 +482,7 @@ fun run_shell() [
                 gkey = key
                 let k = 0
                 while k < outs.len() [
-                    if not wall_is_image(s.c.clone()) [
+                    if not s.wimg [
                         let wo = wallpaper_opts("hwde-wallpaper")
                         if outs[k] != "" [
                             wo = wo + ";output=" + outs[k]
