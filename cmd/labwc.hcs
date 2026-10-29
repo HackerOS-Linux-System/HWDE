@@ -179,6 +179,11 @@ fun labwc_env_text(c: Conf) -> Str [
     e = e + "XKB_DEFAULT_LAYOUT=" + cget(c.clone(), "input.layout") + "\n"
     e = e + "XKB_DEFAULT_VARIANT=" + cget(c.clone(), "input.variant") + "\n"
     e = e + "XKB_DEFAULT_OPTIONS=" + cget(c.clone(), "input.options") + "\n"
+    let ct = cget(c.clone(), "appearance.cursor_theme")
+    if ct != "" [
+        e = e + "XCURSOR_THEME=" + ct + "\n"
+    ]
+    e = e + "XCURSOR_SIZE=" + (iclamp(cget_i(c.clone(), "appearance.cursor_size"), 12, 96) as Str) + "\n"
     e = e + "XDG_CURRENT_DESKTOP=HWDE:wlroots\nXDG_SESSION_DESKTOP=HWDE\nXDG_SESSION_TYPE=wayland\n"
     e = e + "MOZ_ENABLE_WAYLAND=1\nQT_QPA_PLATFORM=wayland;xcb\nGDK_BACKEND=wayland,x11\nSDL_VIDEODRIVER=wayland,x11\nELECTRON_OZONE_PLATFORM_HINT=auto\n_JAVA_AWT_WM_NONREPARENTING=1\n"
     end e
@@ -193,18 +198,35 @@ fun labwc_apply(c: Conf, reconfigure: Bool) [
     gui_write_file(d + "/themerc-override", themerc_text(c.clone(), th))
     gui_write_file(d + "/menu.xml", labwc_menu_text(c.clone()))
     gui_write_file(d + "/environment", labwc_env_text(c.clone()))
-    gui_write_file(d + "/autostart", "# HWDE - generowane. Wlasne programy: sekcja [autostart] w hwde.conf\nhwde autostart >/dev/null 2>&1 &\n")
+    gui_write_file(d + "/autostart", "# HWDE - generowane. Wlasne programy: zmienne autostart_a001... w hwde.conf\nhwde autostart >/dev/null 2>&1 &\n")
     if reconfigure [
         !! labwc przeladowuje konfiguracje po SIGHUP (to samo robi `labwc --reconfigure`)
         hw_status("pkill", ["-HUP", "-u", hw_user(), "-x", "labwc"])
     ]
-    !! aplikacje GTK/portale: preferencja jasny/ciemny (gdy jest gsettings)
-    if hw_which("gsettings") [
+    !! aplikacje GTK/portale: preferencja jasny/ciemny oraz kursor (gdy jest gsettings)
+    if hw_which("gsettings") and cget_b(c.clone(), "appearance.gtk_sync") [
         let scheme = "prefer-light"
         if is_dark(c.clone()) [
             scheme = "prefer-dark"
         ]
         gui_spawn("gsettings", ["set", "org.gnome.desktop.interface", "color-scheme", scheme])
+        let ct = cget(c.clone(), "appearance.cursor_theme")
+        if ct != "" [
+            gui_spawn("gsettings", ["set", "org.gnome.desktop.interface", "cursor-theme", ct])
+        ]
+        gui_spawn("gsettings", ["set", "org.gnome.desktop.interface", "cursor-size", (iclamp(cget_i(c.clone(), "appearance.cursor_size"), 12, 96) as Str)])
+    ]
+    if reconfigure [
+        night_apply(c.clone())
+    ]
+]
+
+!! nocne swiatlo (cieplejsza barwa ekranu) przez wlsunset; wylaczone/brak programu = zatrzymane
+fun night_apply(c: Conf) [
+    hw_status("pkill", ["-u", hw_user(), "-x", "wlsunset"])
+    if cget_b(c.clone(), "night.enabled") and hw_which("wlsunset") [
+        let t = iclamp(cget_i(c.clone(), "night.temp"), 2500, 6500)
+        gui_spawn("wlsunset", ["-t", (t as Str), "-T", "6500", "-S", cget(c.clone(), "night.end"), "-s", cget(c.clone(), "night.start")])
     ]
 ]
 
@@ -233,6 +255,7 @@ fun run_autostart() [
         gui_spawn("dbus-update-activation-environment", ["--systemd", "WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE", "DISPLAY"])
     ]
     apply_display(c.clone())
+    night_apply(c.clone())
     let agents = ["/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1", "/usr/libexec/polkit-gnome-authentication-agent-1", "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1", "/usr/bin/lxqt-policykit-agent", "/usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1", "/usr/libexec/hyprpolkitagent"]
     let a = 0
     while a < agents.len() [
