@@ -1,8 +1,8 @@
 # Dostosowywanie
 
 ## 1. Ustawienia (GUI)
-`hwde settings` (albo `Super+,`) — osiem stron: Wygląd, Panel, Okna, Wejście, Ekran i dźwięk, Powiadomienia i blokada,
-Skróty i aplikacje, System. Wszystko zapisuje do `hwde.conf`.
+`hwde settings` (albo `Super+,`) — dziewięć stron: Wygląd, Tapety, Panel, Okna, Wejście, Ekran i dźwięk, Powiadomienia i blokada,
+Skróty i aplikacje, System, plus wyszukiwarka ustawień. Zmiany trafiają do bloku `hwde-settings` w `hwde.conf` (plik Hacker Langa).
 
 ## 2. Własny CSS — `~/.config/hwde/custom.css`
 Ładowany po wbudowanym arkuszu i przeładowywany po zapisie. Obsługiwane: selektory `typ`, `.klasa`, `#id`, listy po
@@ -13,13 +13,12 @@ Panel ma id `#hwde-panel`. Przykład w `examples/custom.css`. Pełny opis: `vend
 ## 3. Moduły panelu
 `panel.left/center/right` to listy modułów w dowolnej kolejności, np. panel w stylu docka na dole:
 
-```ini
-[panel]
-position = bottom
-floating = 1
-left = launcher
-center = tasks
-right = status,clock,power
+```hl
+% panel_position: str = "bottom"
+% panel_floating: int = 1
+% panel_left: str = "launcher"
+% panel_center: str = "tasks"
+% panel_right: str = "status,clock,power"
 ```
 
 ## 4. labwc
@@ -31,4 +30,4 @@ right = status,clock,power
 `hwde notify "Tytuł" "Treść"` albo dowolny klient `org.freedesktop.Notifications` (`notify-send`, aplikacje).
 
 ## 6. Uruchamianie dodatkowych programów
-Sekcja `[autostart]`, a dla pasków/widżetów innych autorów — warstwy layer-shell działają obok powłoki HWDE.
+Zmienne `autostart_a001`, `autostart_a002`…, a dla pasków/widżetów innych autorów — warstwy layer-shell działają obok powłoki HWDE.
