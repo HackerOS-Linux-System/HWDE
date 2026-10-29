@@ -1,0 +1,490 @@
+get <bit:gui>
+include <sys>
+include <conf>
+include <sysinfo>
+
+!! ============================================================================
+!! HWDE 0.2 - tapety: gradient / kolor / obraz / pokaz slajdow, presety, tryby
+!! dopasowania, tapeta osobno dla ciemnego i jasnego motywu oraz dla kazdego
+!! monitora. Obrazy wyswietla swaybg; gradient i kolor rysuje sama powloka.
+!! Stan pokazu slajdow: plik $XDG_RUNTIME_DIR/hwde-wallpaper (sciezka biezacego
+!! obrazu; jego czas modyfikacji liczy odstep do nastepnej zmiany).
+!! ============================================================================
+
+!! ---------------------------------------------------------------- presety gradientow: "id|PL|EN|kolor1|kolor2|kat"
+fun wall_presets() -> List<Str> [
+    end [
+        "graphite|Grafit|Graphite|#2a2a2f|#0a0a0b|160",
+        "midnight|Północ|Midnight|#27235f|#0a0a18|150",
+        "ocean|Ocean|Ocean|#0ea5e9|#1e3a8a|135",
+        "forest|Las|Forest|#166534|#052e16|160",
+        "sunset|Zachód|Sunset|#fb923c|#9d174d|140",
+        "aurora|Zorza|Aurora|#14b8a6|#6d28d9|120",
+        "rose|Róża|Rose|#f472b6|#6b21a8|135",
+        "ember|Żar|Ember|#b91c1c|#1c1917|165",
+        "slate|Łupek|Slate|#64748b|#0f172a|180",
+        "sand|Piasek|Sand|#f5f5f4|#d6d3d1|160",
+        "mint|Mięta|Mint|#d1fae5|#6ee7b7|150",
+        "paper|Papier|Paper|#fafafa|#e4e4e7|170"
+    ]
+]
+
+fun wall_preset_field(i: Int, f: Int) -> Str [
+    let l = wall_presets()
+    let p = s_split(l[iclamp(i, 0, l.len() - 1)].clone(), "|")
+    end p[f].clone()
+]
+
+fun wall_preset_index(id: Str) -> Int [
+    let l = wall_presets()
+    let i = 0
+    while i < l.len() [
+        if wall_preset_field(i, 0) == id [
+            end i
+        ]
+        i = i + 1
+    ]
+    end -1
+]
+
+fun wall_preset_apply(c: Conf, id: Str) -> Bool [
+    let i = wall_preset_index(id.clone())
+    if i < 0 [
+        end false
+    ]
+    cset(c, "wallpaper.mode", "gradient")
+    cset(c, "wallpaper.preset", id)
+    cset(c, "wallpaper.color1", wall_preset_field(i, 3))
+    cset(c, "wallpaper.color2", wall_preset_field(i, 4))
+    cset(c, "wallpaper.angle", wall_preset_field(i, 5))
+    end true
+]
+
+fun b01(b: Bool) -> Str [
+    if b [
+        end "1"
+    ]
+    end "0"
+]
+
+!! ---------------------------------------------------------------- sciezki i listy plikow
+fun wall_expand(p: Str) -> Str [
+    if s_starts(p.clone(), "~/") [
+        end home_dir() + s_sub(p.clone(), 1, slen(p.clone()))
+    ]
+    end p
+]
+
+fun wall_abs(p: Str) -> Str [
+    let e = wall_expand(p.clone())
+    if s_starts(e.clone(), "/") [
+        end e
+    ]
+    let pwd = gui_env("PWD")
+    if pwd == "" [
+        end e
+    ]
+    end pwd + "/" + e
+]
+
+fun wall_dirs(c: Conf) -> List<Str> [
+    let d: List<Str> = []
+    let f = wall_expand(cget(c.clone(), "wallpaper.folder"))
+    if f != "" [
+        d.push(f)
+    ]
+    d.push(home_dir() + "/.local/share/hwde/wallpapers")
+    d.push("/usr/share/hwde/wallpapers")
+    d.push("/usr/share/backgrounds")
+    d.push(home_dir() + "/Pictures/Wallpapers")
+    d.push(home_dir() + "/Pictures")
+    end d
+]
+
+fun wall_scan(dir: Str, depth: Int) -> List<Str> [
+    let args: List<Str> = [dir, "-maxdepth", (depth as Str), "-type", "f", "(", "-iname", "*.png", "-o", "-iname", "*.jpg", "-o", "-iname", "*.jpeg", "-o", "-iname", "*.webp", "-o", "-iname", "*.bmp", ")"]
+    let out: List<Str> = []
+    let lines = s_split(gui_run("find", args), "\n")
+    let i = 0
+    while i < lines.len() and out.len() < 400 [
+        let ln = trim(lines[i].clone())
+        if ln != "" [
+            out.push(ln)
+        ]
+        i = i + 1
+    ]
+    end out
+]
+
+!! wszystkie znalezione obrazy (bez duplikatow, posortowane, maks. 500)
+fun wall_list(c: Conf) -> List<Str> [
+    let all: List<Str> = []
+    let dirs = wall_dirs(c.clone())
+    let i = 0
+    while i < dirs.len() [
+        if fexists(dirs[i].clone()) [
+            let found = wall_scan(dirs[i].clone(), 2)
+            let k = 0
+            while k < found.len() and all.len() < 500 [
+                if not list_has(all.clone(), found[k].clone()) [
+                    all.push(found[k].clone())
+                ]
+                k = k + 1
+            ]
+        ]
+        i = i + 1
+    ]
+    end sort_strs(all)
+]
+
+!! obrazy pokazu slajdow: folder z ustawien, a gdy pusty - wszystkie znalezione
+fun wall_slide_list(c: Conf) -> List<Str> [
+    let f = wall_expand(cget(c.clone(), "wallpaper.folder"))
+    if f != "" and fexists(f.clone()) [
+        end sort_strs(wall_scan(f, 3))
+    ]
+    end wall_list(c.clone())
+]
+
+fun wall_base(p: Str) -> Str [
+    let parts = s_split(p, "/")
+    end parts[parts.len() - 1].clone()
+]
+
+!! ---------------------------------------------------------------- stan pokazu slajdow
+fun wall_state_path() -> Str [
+    end hw_run_dir() + "/hwde-wallpaper"
+]
+
+fun wall_state_get() -> Str [
+    end trim(gui_read_file(wall_state_path()))
+]
+
+fun wall_state_set(p: Str) [
+    gui_write_file(wall_state_path(), p)
+]
+
+!! wybiera kolejny obraz: how = "auto" (wg wallpaper.order), "next", "prev", "random"
+fun wall_pick(c: Conf, how: Str) -> Str [
+    let l = wall_slide_list(c.clone())
+    if l.len() == 0 [
+        end ""
+    ]
+    if l.len() == 1 [
+        end l[0].clone()
+    ]
+    let cur = wall_state_get()
+    let rnd = how == "random" or (how == "auto" and cget(c.clone(), "wallpaper.order") != "sequential")
+    if rnd [
+        let r = hw_epoch_ms() % l.len()
+        if l[r] == cur [
+            r = (r + 1) % l.len()
+        ]
+        end l[r].clone()
+    ]
+    let idx = -1
+    let i = 0
+    while i < l.len() [
+        if l[i] == cur [
+            idx = i
+        ]
+        i = i + 1
+    ]
+    if how == "prev" [
+        if idx <= 0 [
+            end l[l.len() - 1].clone()
+        ]
+        end l[idx - 1].clone()
+    ]
+    end l[(idx + 1) % l.len()].clone()
+]
+
+!! ---------------------------------------------------------------- co jest aktualnie tapeta
+fun wall_effective(c: Conf, dark: Bool) -> Str [
+    let mode = cget(c.clone(), "wallpaper.mode")
+    if mode == "image" [
+        let f = ""
+        if dark [
+            f = cget(c.clone(), "wallpaper.image_dark")
+        ] else [
+            f = cget(c.clone(), "wallpaper.image_light")
+        ]
+        if f == "" [
+            f = cget(c.clone(), "wallpaper.image")
+        ]
+        f = wall_expand(f)
+        if f != "" and fexists(f.clone()) [
+            end f
+        ]
+        end ""
+    ]
+    if mode == "slideshow" [
+        let cur = wall_state_get()
+        if cur == "" or not fexists(cur.clone()) [
+            cur = wall_pick(c.clone(), "auto")
+            if cur != "" [
+                wall_state_set(cur.clone())
+            ]
+        ]
+        end cur
+    ]
+    end ""
+]
+
+fun wall_out_keys(c: Conf) -> List<Str> [
+    let keys = c.kv.keys()
+    let out: List<Str> = []
+    let i = 0
+    while i < keys.len() [
+        if s_starts(keys[i].clone(), "wallpaper.out.") and cget(c.clone(), keys[i].clone()) != "" [
+            out.push(keys[i].clone())
+        ]
+        i = i + 1
+    ]
+    end sort_strs(out)
+]
+
+!! czy tapete ma rysowac swaybg (obraz), a nie powloka (gradient/kolor)
+fun wall_is_image(c: Conf) -> Bool [
+    if not hw_which("swaybg") [
+        end false
+    ]
+    if wall_effective(c.clone(), is_dark(c.clone())) != "" [
+        end true
+    ]
+    let outs = wall_out_keys(c.clone())
+    let i = 0
+    while i < outs.len() [
+        if fexists(wall_expand(cget(c.clone(), outs[i].clone()))) [
+            end true
+        ]
+        i = i + 1
+    ]
+    end false
+]
+
+!! podpis stanu tapety - powloka stosuje tapete ponownie tylko gdy sie zmieni
+fun wall_sig(c: Conf) -> Str [
+    let sig = cget(c.clone(), "wallpaper.mode") + "|" + cget(c.clone(), "wallpaper.fit") + "|" + cget(c.clone(), "wallpaper.color1")
+    if wall_is_image(c.clone()) [
+        sig = sig + "|img|" + wall_effective(c.clone(), is_dark(c.clone()))
+        let outs = wall_out_keys(c.clone())
+        let i = 0
+        while i < outs.len() [
+            sig = sig + "|" + outs[i] + "=" + cget(c.clone(), outs[i].clone())
+            i = i + 1
+        ]
+    ] else [
+        sig = sig + "|gfx"
+    ]
+    end sig
+]
+
+fun wall_bg_color(c: Conf) -> Str [
+    let col = cget(c.clone(), "wallpaper.color1")
+    if slen(col.clone()) == 7 and s_starts(col.clone(), "#") [
+        end col
+    ]
+    end "#000000"
+]
+
+fun wall_apply_image(c: Conf) [
+    hw_status("pkill", ["-x", "swaybg"])
+    if not wall_is_image(c.clone()) [
+        end
+    ]
+    let fit = cget(c.clone(), "wallpaper.fit")
+    if not list_has(["fill", "fit", "stretch", "center", "tile"], fit.clone()) [
+        fit = "fill"
+    ]
+    let args: List<Str> = []
+    let outs = wall_out_keys(c.clone())
+    let i = 0
+    while i < outs.len() [
+        let f = wall_expand(cget(c.clone(), outs[i].clone()))
+        if fexists(f.clone()) [
+            args.push("-o")
+            args.push(s_sub(outs[i].clone(), 14, slen(outs[i].clone())))
+            args.push("-i")
+            args.push(f)
+            args.push("-m")
+            args.push(fit.clone())
+        ]
+        i = i + 1
+    ]
+    let main = wall_effective(c.clone(), is_dark(c.clone()))
+    args.push("-o")
+    args.push("*")
+    if main != "" [
+        args.push("-i")
+        args.push(main)
+        args.push("-m")
+        args.push(fit)
+    ] else [
+        args.push("-m")
+        args.push("solid_color")
+    ]
+    args.push("-c")
+    args.push(wall_bg_color(c.clone()))
+    gui_spawn("swaybg", args)
+]
+
+!! odlicza czas pokazu slajdow; zwraca true, gdy wybrano nowy obraz (zastosuje go powloka po zmianie wall_sig)
+fun wall_tick(c: Conf) -> Bool [
+    if cget(c.clone(), "wallpaper.mode") != "slideshow" [
+        end false
+    ]
+    let iv = cget_i(c.clone(), "wallpaper.interval")
+    if iv < 1 [
+        iv = 15
+    ]
+    let m = hw_mtime(wall_state_path())
+    if m < 0 [
+        end false
+    ]
+    if hw_epoch_ms() - m >= iv * 60000 [
+        let nx = wall_pick(c.clone(), "auto")
+        if nx != "" [
+            wall_state_set(nx)
+            end true
+        ]
+    ]
+    end false
+]
+
+!! zmiana obrazu na zadanie (przycisk w Ustawieniach, hwde wallpaper next|prev|random); tapete odswieza powloka
+fun wall_step(c: Conf, how: Str) -> Str [
+    let nx = wall_pick(c.clone(), how)
+    if nx != "" [
+        wall_state_set(nx.clone())
+    ]
+    end nx
+]
+
+!! ---------------------------------------------------------------- widok gradientu / koloru (rysowany przez powloke)
+fun wall_colors(c: Conf, th: Theme) -> List<Int> [
+    let a = cget(c.clone(), "wallpaper.color1")
+    let b = cget(c.clone(), "wallpaper.color2")
+    let out: List<Int> = []
+    if a == "" [
+        if th.dark [
+            a = "#2a2a2f"
+        ] else [
+            a = "#f4f4f6"
+        ]
+    ]
+    if b == "" [
+        if th.dark [
+            b = "#0a0a0b"
+        ] else [
+            b = "#cfcfd6"
+        ]
+    ]
+    out.push(parse_color(a))
+    out.push(parse_color(b))
+    end out
+]
+
+fun wall_view(c: Conf, th: Theme) -> Element [
+    let cols = wall_colors(c.clone(), th.clone())
+    let e = container(space().fill_all()).fill_all()
+    if cget(c.clone(), "wallpaper.mode") == "color" [
+        end e.background(cols[0])
+    ]
+    end e.gradient(cols[0], cols[1], cget_f(c.clone(), "wallpaper.angle"))
+]
+
+!! ---------------------------------------------------------------- hwde wallpaper ...
+fun run_wallpaper(a: List<Str>) [
+    let c = conf_load()
+    let sub = "current"
+    if a.len() > 1 [
+        sub = a[1].clone()
+    ]
+    let changed = false
+    if sub == "set" and a.len() > 2 [
+        let f = wall_abs(a[2].clone())
+        if not fexists(f.clone()) [
+            log("brak pliku: " + f)
+            end
+        ]
+        cset(c, "wallpaper.mode", "image")
+        cset(c, "wallpaper.image", f)
+        changed = true
+    ]
+    if sub == "color" and a.len() > 2 [
+        cset(c, "wallpaper.mode", "color")
+        cset(c, "wallpaper.color1", a[2].clone())
+        changed = true
+    ]
+    if sub == "gradient" and a.len() > 3 [
+        cset(c, "wallpaper.mode", "gradient")
+        cset(c, "wallpaper.color1", a[2].clone())
+        cset(c, "wallpaper.color2", a[3].clone())
+        if a.len() > 4 [
+            cset(c, "wallpaper.angle", a[4].clone())
+        ]
+        changed = true
+    ]
+    if sub == "preset" and a.len() > 2 [
+        if wall_preset_apply(c, a[2].clone()) [
+            changed = true
+        ] else [
+            log("nieznany preset: " + a[2])
+            end
+        ]
+    ]
+    if sub == "folder" and a.len() > 2 [
+        cset(c, "wallpaper.mode", "slideshow")
+        cset(c, "wallpaper.folder", wall_abs(a[2].clone()))
+        changed = true
+    ]
+    if sub == "slideshow" [
+        cset(c, "wallpaper.mode", "slideshow")
+        changed = true
+    ]
+    if sub == "next" or sub == "prev" or sub == "random" [
+        if cget(c.clone(), "wallpaper.mode") == "slideshow" [
+            log(wall_step(c.clone(), sub.clone()))
+        ] else [
+            let nx = wall_pick(c.clone(), sub.clone())
+            if nx != "" [
+                cset(c, "wallpaper.mode", "image")
+                cset(c, "wallpaper.image", nx.clone())
+                changed = true
+                log(nx)
+            ]
+        ]
+    ]
+    if sub == "reload" [
+        wall_apply_image(c.clone())
+    ]
+    if sub == "list" [
+        let p = wall_presets()
+        let i = 0
+        while i < p.len() [
+            log("preset  " + wall_preset_field(i, 0) + "  (" + tr(c.clone(), wall_preset_field(i, 1), wall_preset_field(i, 2)) + ")")
+            i = i + 1
+        ]
+        let l = wall_list(c.clone())
+        let k = 0
+        while k < l.len() [
+            log(l[k].clone())
+            k = k + 1
+        ]
+    ]
+    if sub == "current" [
+        let e = wall_effective(c.clone(), is_dark(c.clone()))
+        if e == "" [
+            log("tryb: " + cget(c.clone(), "wallpaper.mode") + "  (" + cget(c.clone(), "wallpaper.color1") + " -> " + cget(c.clone(), "wallpaper.color2") + ")")
+        ] else [
+            log(e)
+        ]
+    ]
+    if sub == "help" [
+        log("hwde wallpaper set <plik> | color <#hex> | gradient <#c1> <#c2> [kat] | preset <id> | folder <katalog> | slideshow | next | prev | random | reload | list | current")
+    ]
+    if changed [
+        conf_save(c.clone())
+    ]
+]
